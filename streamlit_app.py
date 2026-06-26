@@ -319,7 +319,7 @@ class ProductBatch:
     roi: float = 0
     risk_score: float = 0
 
-    # 🆕 ЮНИТ-ЭКОНОМИКА (детальная)
+    # ЮНИТ-ЭКОНОМИКА (детальная)
     contribution_margin: float = 0
     contribution_margin_pct: float = 0
     break_even_units: int = 0
@@ -381,31 +381,12 @@ class ProductBatch:
 class UnitEconomicsAnalyzer:
     """
     Детальный анализ юнит-экономики по каждому товару
-    
-    📊 Включает:
-        - Contribution Margin (маржинальный доход)
-        - Точку безубыточности (Break-Even)
-        - LTV / CAC / ROAS / ДРР
-        - Структуру расходов на 1 единицу
-        - Анализ чувствительности (что-if)
-        - Рекомендации по оптимизации
-    
-    💡 Подсказка: Используйте для оценки рентабельности каждого товара
     """
     
     def analyze_product(self, product: ProductBatch, fixed_costs_per_month: float = 0,
                        avg_orders_per_month: int = 100, monthly_demand: int = None) -> Dict:
         """
         Полный анализ юнит-экономики для одного товара
-        
-        Args:
-            product: Товар для анализа
-            fixed_costs_per_month: Постоянные расходы в месяц (₽)
-            avg_orders_per_month: Среднее количество заказов в месяц
-            monthly_demand: Месячный спрос в единицах товара
-        
-        Returns:
-            Словарь со всеми показателями юнит-экономики
         """
         if monthly_demand is None:
             monthly_demand = avg_orders_per_month
@@ -492,9 +473,7 @@ class UnitEconomicsAnalyzer:
         }
 
     def _calculate_payback(self, product: ProductBatch, monthly_demand: int) -> float:
-        """
-        Расчет срока окупаемости
-        """
+        """Расчет срока окупаемости"""
         if monthly_demand <= 0:
             return 999
         
@@ -513,9 +492,7 @@ class UnitEconomicsAnalyzer:
                           retention_rate: float = 0.7,
                           discount_rate: float = 0.1,
                           customers_per_1000_rub: int = 5) -> Dict:
-        """
-        Расчет LTV и CAC
-        """
+        """Расчет LTV и CAC"""
         monthly_profit = product.unit_profit
         
         ltv = monthly_profit / (1 - retention_rate + discount_rate)
@@ -535,9 +512,7 @@ class UnitEconomicsAnalyzer:
         }
 
     def _interpret_ltv_cac(self, ratio: float) -> str:
-        """
-        Интерпретация соотношения LTV/CAC
-        """
+        """Интерпретация соотношения LTV/CAC"""
         if ratio < 1:
             return "🔴 Критично: LTV < CAC. Вы тратите больше на привлечение, чем зарабатываете!"
         elif ratio < 3:
@@ -546,9 +521,7 @@ class UnitEconomicsAnalyzer:
             return "🟢 Отличный показатель. Можно масштабировать рекламный бюджет"
 
     def _calculate_sensitivity(self, product: ProductBatch) -> Dict:
-        """
-        Анализ чувствительности
-        """
+        """Анализ чувствительности"""
         base_profit = product.price - product.total_variable_costs
 
         price_up_10 = (product.price * 1.10) - product.total_variable_costs
@@ -597,9 +570,7 @@ class UnitEconomicsAnalyzer:
 
     def _generate_recommendations(self, product: ProductBatch, cm_pct: float,
                                  ltv_cac: float, drr: float) -> List[str]:
-        """
-        Генерирует рекомендации по оптимизации юнит-экономики
-        """
+        """Генерирует рекомендации по оптимизации юнит-экономики"""
         recs = []
 
         if cm_pct < 20:
@@ -641,9 +612,7 @@ class UnitEconomicsAnalyzer:
         return recs
 
     def analyze_portfolio(self, products: List[ProductBatch]) -> Dict:
-        """
-        Анализ юнит-экономики всего портфеля
-        """
+        """Анализ юнит-экономики всего портфеля"""
         total_revenue = sum(p.price for p in products)
         total_variable_costs = sum(p.total_variable_costs for p in products)
         total_profit = sum(p.unit_profit for p in products)
@@ -680,9 +649,7 @@ class UnitEconomicsAnalyzer:
 # 🕷️ МОНИТОРИНГ СВОИХ ТОВАРОВ
 # --------------------------------------------
 class MyProductTracker:
-    """
-    Отслеживает ТОЛЬКО ваши товары на маркетплейсах
-    """
+    """Отслеживает ТОЛЬКО ваши товары на маркетплейсах"""
     
     def __init__(self, use_selenium: bool = True):
         self.use_selenium = use_selenium and SELENIUM_AVAILABLE
@@ -690,9 +657,7 @@ class MyProductTracker:
 
     def track_my_product(self, product: ProductBatch, marketplace: str,
                         progress_callback: Optional[Callable] = None) -> Dict:
-        """
-        Отслеживание одного товара
-        """
+        """Отслеживание одного товара"""
         if not self.use_selenium or not self.scraper:
             return self._simulate_tracking(product, marketplace)
 
@@ -735,14 +700,10 @@ class MyProductTracker:
 # 📈 ПРОГНОЗИРОВАНИЕ СПРОСА
 # --------------------------------------------
 class DemandForecaster:
-    """
-    Прогноз спроса на основе исторических данных
-    """
+    """Прогноз спроса на основе исторических данных"""
     
     def forecast(self, history: List[float], days: int = 90, alpha: float = 0.3) -> Dict:
-        """
-        Прогноз на указанное количество дней
-        """
+        """Прогноз на указанное количество дней"""
         if not history or len(history) < 3:
             history = [random.randint(5, 20) for _ in range(30)]
 
@@ -802,14 +763,10 @@ class DemandForecaster:
 # 🎯 ABC/XYZ АНАЛИЗ
 # --------------------------------------------
 class InventoryAnalyzer:
-    """
-    ABC/XYZ анализ ассортимента
-    """
+    """ABC/XYZ анализ ассортимента"""
     
     def abc_analysis(self, products: List[ProductBatch]) -> Dict:
-        """
-        ABC-анализ - учитывает все товары, включая убыточные
-        """
+        """ABC-анализ - учитывает все товары, включая убыточные"""
         sorted_products = sorted(products, key=lambda x: x.unit_profit, reverse=True)
         
         total_abs_profit = sum(abs(p.unit_profit) for p in sorted_products)
@@ -880,31 +837,23 @@ class InventoryAnalyzer:
 # 📦 УПРАВЛЕНИЕ ЗАПАСАМИ
 # --------------------------------------------
 class InventoryOptimizer:
-    """
-    Оптимизация управления запасами
-    """
+    """Оптимизация управления запасами"""
     
     def calculate_eoq(self, annual_demand: float, order_cost: float = 500,
                      holding_cost_per_unit: float = 100) -> float:
-        """
-        Расчет EOQ (Economic Order Quantity)
-        """
+        """Расчет EOQ (Economic Order Quantity)"""
         if holding_cost_per_unit <= 0:
             return 0
         return math.sqrt((2 * annual_demand * order_cost) / holding_cost_per_unit)
 
     def calculate_reorder_point(self, daily_sales: float, lead_time_days: int = 7,
                                safety_stock: float = 0) -> float:
-        """
-        Расчет точки заказа
-        """
+        """Расчет точки заказа"""
         return (daily_sales * lead_time_days) + safety_stock
 
     def calculate_safety_stock(self, daily_sales_std: float, lead_time_days: int = 7,
                               service_level: float = 0.95) -> float:
-        """
-        Расчет страхового запаса
-        """
+        """Расчет страхового запаса"""
         z_scores = {0.90: 1.28, 0.95: 1.65, 0.97: 1.88, 0.99: 2.33}
         z = z_scores.get(service_level, 1.65)
         return z * daily_sales_std * math.sqrt(lead_time_days)
@@ -924,9 +873,7 @@ class InventoryOptimizer:
             return "🟢 Норма"
 
     def optimize_product(self, product: ProductBatch, current_stock: float = 100) -> Dict:
-        """
-        Комплексная оптимизация товара
-        """
+        """Комплексная оптимизация товара"""
         history = product.daily_sales_history if product.daily_sales_history else [random.randint(5, 15) for _ in range(30)]
         avg_daily = np.mean(history)
         std_daily = np.std(history) if len(history) > 1 else 0
@@ -963,9 +910,7 @@ class InventoryOptimizer:
 # 🏪 МУЛЬТИ-МАРКЕТПЛЕЙС АНАЛИЗ
 # --------------------------------------------
 class MultiMarketplaceAnalyzer:
-    """
-    Анализ эффективности продаж на разных маркетплейсах
-    """
+    """Анализ эффективности продаж на разных маркетплейсах"""
     
     def __init__(self):
         self.marketplace_params = {
@@ -977,9 +922,7 @@ class MultiMarketplaceAnalyzer:
         }
 
     def analyze_product(self, product: ProductBatch) -> Dict:
-        """
-        Анализ товара на всех маркетплейсах
-        """
+        """Анализ товара на всех маркетплейсах"""
         results = {}
 
         for mp, params in self.marketplace_params.items():
@@ -1013,14 +956,10 @@ class MultiMarketplaceAnalyzer:
 # ⚠️ ПРОГНОЗ ВОЗВРАТОВ
 # --------------------------------------------
 class ReturnPredictor:
-    """
-    Прогноз вероятности возвратов
-    """
+    """Прогноз вероятности возвратов"""
     
     def predict(self, product: ProductBatch) -> Dict:
-        """
-        Прогноз вероятности возврата
-        """
+        """Прогноз вероятности возврата"""
         risk_factors = []
         probability = 0.10
 
@@ -1097,9 +1036,7 @@ class ReturnPredictor:
 # 🚚 ОПТИМИЗАЦИЯ ЛОГИСТИКИ
 # --------------------------------------------
 class LogisticsOptimizer:
-    """
-    Оптимизация логистических расходов
-    """
+    """Оптимизация логистических расходов"""
     
     PROVIDERS = {
         "СДЭК": {"base": 250, "per_kg": 50, "per_liter": 10, "days": 3, "reliability": 0.95},
@@ -1110,9 +1047,7 @@ class LogisticsOptimizer:
     }
 
     def optimize(self, product: ProductBatch) -> Dict:
-        """
-        Оптимизация логистики для товара
-        """
+        """Оптимизация логистики для товара"""
         results = {}
 
         for provider, params in self.PROVIDERS.items():
@@ -1145,14 +1080,10 @@ class LogisticsOptimizer:
 # 💰 P&L ОТЧЁТ
 # --------------------------------------------
 class PLReportGenerator:
-    """
-    P&L Отчёт (Прибыли и Убытки)
-    """
+    """P&L Отчёт (Прибыли и Убытки)"""
     
     def generate(self, products: List[ProductBatch]) -> Dict:
-        """
-        Генерация P&L отчёта
-        """
+        """Генерация P&L отчёта"""
         total_revenue = sum(p.price for p in products)
         total_cogs = sum(p.cost for p in products)
         total_commission = sum(p.commission for p in products)
@@ -1202,14 +1133,10 @@ class PLReportGenerator:
 # 🧪 A/B ТЕСТИРОВАНИЕ ЦЕН
 # --------------------------------------------
 class ABTestSimulator:
-    """
-    A/B Тестирование ценовых стратегий
-    """
+    """A/B Тестирование ценовых стратегий"""
     
     def run_test(self, products: List[ProductBatch], test_days: int = 14) -> Dict:
-        """
-        Запуск A/B/C теста
-        """
+        """Запуск A/B/C теста"""
         top_products = sorted(products, key=lambda x: x.price * 10, reverse=True)[:20]
         
         results = []
@@ -1279,9 +1206,7 @@ class NotificationManager:
     
     @staticmethod
     def send_alert(email: str, password: str, to_email: str, subject: str, body: str) -> bool:
-        """
-        Отправка email уведомления
-        """
+        """Отправка email уведомления"""
         try:
             msg = MIMEMultipart()
             msg['From'] = email
@@ -1301,9 +1226,7 @@ class NotificationManager:
 
     @staticmethod
     def generate_alerts(products: List[ProductBatch]) -> List[Dict]:
-        """
-        Генерация алертов по товарам
-        """
+        """Генерация алертов по товарам"""
         alerts = []
 
         critical_stock = [p for p in products if "Критический" in p.stock_status]
@@ -1358,18 +1281,14 @@ class NotificationManager:
 # 🤖 AI-АНАЛИЗАТОР
 # --------------------------------------------
 class AIAnalyzer:
-    """
-    AI анализ через DeepSeek API
-    """
+    """AI анализ через DeepSeek API"""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.api_url = "https://api.deepseek.com/v1/chat/completions"
 
     def analyze_products(self, products: List[ProductBatch]) -> List[ProductBatch]:
-        """
-        AI анализ товаров
-        """
+        """AI анализ товаров"""
         products_to_analyze = products[:CONFIG['max_ai_products']]
 
         products_data = [{
@@ -1460,9 +1379,7 @@ class TariffManager:
 # 🔄 БАТЧ-ПРОЦЕССОР
 # --------------------------------------------
 class BatchProcessor:
-    """
-    Обработка данных и расчет всех показателей
-    """
+    """Обработка данных и расчет всех показателей"""
     
     def __init__(self):
         self.tariff_manager = TariffManager()
@@ -1478,9 +1395,7 @@ class BatchProcessor:
                     category: str, season: str, quality: int,
                     days_storage: int, include_acquiring: bool,
                     include_advertising: bool, advertising_rate: float = 0.15) -> List[ProductBatch]:
-        """
-        Обработка файла с товарами
-        """
+        """Обработка файла с товарами"""
         tariffs = self.tariff_manager.get_tariffs(marketplace)
 
         if file_obj.name.endswith('.csv'):
@@ -1667,16 +1582,12 @@ class BatchProcessor:
 # 📥 ЭКСПОРТ
 # --------------------------------------------
 class LargeDataExporter:
-    """
-    Экспорт данных в Excel с формулами
-    """
+    """Экспорт данных в Excel с формулами"""
     
     @staticmethod
     def to_excel_with_formulas(products: List[ProductBatch], marketplace: str = "Ozon",
                                days_storage: int = 30, tariffs: Dict = None) -> bytes:
-        """
-        Экспорт в Excel с формулами
-        """
+        """Экспорт в Excel с формулами"""
         output = io.BytesIO()
         wb = Workbook()
 
@@ -1736,9 +1647,7 @@ class LargeDataExporter:
 # 🎨 ОСНОВНОЕ ПРИЛОЖЕНИЕ
 # --------------------------------------------
 class UltimateAutoApp:
-    """
-    Полное приложение с упором на юнит-экономику
-    """
+    """Полное приложение с упором на юнит-экономику"""
     
     def __init__(self):
         self.processor = BatchProcessor()
@@ -1890,7 +1799,6 @@ class UltimateAutoApp:
         </div>
         """, unsafe_allow_html=True)
 
-        # API КЛЮЧИ
         st.subheader("🔑 API Ключи")
 
         st.text_input(
@@ -1917,7 +1825,6 @@ class UltimateAutoApp:
 
         st.markdown("---")
 
-        # SELENIUM
         st.subheader("🕷️ Парсер своих товаров")
 
         if SELENIUM_AVAILABLE:
@@ -1943,7 +1850,6 @@ class UltimateAutoApp:
 
         st.markdown("---")
 
-        # ПАРАМЕТРЫ
         st.subheader("📦 Параметры")
         
         st.markdown("""
@@ -2036,7 +1942,6 @@ class UltimateAutoApp:
         else:
             st.session_state.advertising_rate = 0
 
-        # ПАРАМЕТРЫ ЮНИТ-ЭКОНОМИКИ
         st.markdown("---")
         st.subheader("💎 Юнит-экономика")
         
@@ -2321,11 +2226,15 @@ class UltimateAutoApp:
         """Рендер аналитических вкладок"""
         products = st.session_state.results
 
+        if not products:
+            st.warning("⚠️ Нет данных для отображения. Загрузите файл или используйте демо-данные.")
+            return
+
         total = len(products)
         profitable = sum(1 for p in products if p.unit_profit > 0)
         total_profit = sum(p.unit_profit for p in products)
-        avg_margin = np.mean([p.margin for p in products])
-        avg_cm = np.mean([p.contribution_margin_pct for p in products])
+        avg_margin = np.mean([p.margin for p in products]) if products else 0
+        avg_cm = np.mean([p.contribution_margin_pct for p in products]) if products else 0
 
         cols = st.columns(5)
         cols[0].metric("📦 Всего", f"{total:,}")
@@ -2394,32 +2303,38 @@ class UltimateAutoApp:
 
         with col1:
             cm_dist = portfolio['cm_distribution']
-            fig = px.pie(
-                values=list(cm_dist.values()),
-                names=list(cm_dist.keys()),
-                title='Распределение по CM',
-                color_discrete_map={
-                    "Критический (<20%)": "#dc3545",
-                    "Низкий (20-35%)": "#ffc107",
-                    "Средний (35-50%)": "#17a2b8",
-                    "Высокий (>50%)": "#28a745"
-                }
-            )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            if cm_dist and sum(cm_dist.values()) > 0:
+                fig = px.pie(
+                    values=list(cm_dist.values()),
+                    names=list(cm_dist.keys()),
+                    title='Распределение по CM',
+                    color_discrete_map={
+                        "Критический (<20%)": "#dc3545",
+                        "Низкий (20-35%)": "#ffc107",
+                        "Средний (35-50%)": "#17a2b8",
+                        "Высокий (>50%)": "#28a745"
+                    }
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Нет данных для распределения по CM")
 
         with col2:
             top_cm = portfolio['top_by_cm']
-            df_top = pd.DataFrame([{
-                "Артикул": p.article,
-                "Название": p.name[:30],
-                "Цена": f"{p.price:,.0f} ₽",
-                "CM %": f"{p.contribution_margin_pct:.1f}%",
-                "LTV/CAC": f"{p.ltv_cac_ratio:.2f}",
-                "ДРР %": f"{p.drr:.1f}%"
-            } for p in top_cm])
-            st.markdown("**🏆 Топ-10 по Contribution Margin**")
-            st.dataframe(df_top, use_container_width=True, hide_index=True)
+            if top_cm:
+                df_top = pd.DataFrame([{
+                    "Артикул": p.article,
+                    "Название": p.name[:30],
+                    "Цена": f"{p.price:,.0f} ₽",
+                    "CM %": f"{p.contribution_margin_pct:.1f}%",
+                    "LTV/CAC": f"{p.ltv_cac_ratio:.2f}",
+                    "ДРР %": f"{p.drr:.1f}%"
+                } for p in top_cm])
+                st.markdown("**🏆 Топ-10 по Contribution Margin**")
+                st.dataframe(df_top, use_container_width=True, hide_index=True)
+            else:
+                st.info("Нет данных для отображения топа по CM")
 
         st.markdown("---")
         st.markdown("### 🔍 Детальный анализ товара")
@@ -2464,18 +2379,21 @@ class UltimateAutoApp:
 
                     with col1:
                         cost_structure = analysis['unit_cost_structure']
-                        fig = go.Figure(data=[go.Pie(
-                            labels=list(cost_structure.keys()),
-                            values=list(cost_structure.values()),
-                            hole=0.4,
-                            marker=dict(colors=[
-                                '#667eea', '#764ba2', '#f093fb', '#f5576c',
-                                '#4facfe', '#00f2fe', '#43e97b', '#38f9d7',
-                                '#fa709a', '#fee140'
-                            ])
-                        )])
-                        fig.update_layout(title='Структура расходов', height=400)
-                        st.plotly_chart(fig, use_container_width=True)
+                        if cost_structure and sum(cost_structure.values()) > 0:
+                            fig = go.Figure(data=[go.Pie(
+                                labels=list(cost_structure.keys()),
+                                values=list(cost_structure.values()),
+                                hole=0.4,
+                                marker=dict(colors=[
+                                    '#667eea', '#764ba2', '#f093fb', '#f5576c',
+                                    '#4facfe', '#00f2fe', '#43e97b', '#38f9d7',
+                                    '#fa709a', '#fee140'
+                                ])
+                            )])
+                            fig.update_layout(title='Структура расходов', height=400)
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.info("Нет данных о структуре расходов")
 
                     with col2:
                         categories = ['Цена'] + list(cost_structure.keys()) + ['Прибыль']
@@ -2606,11 +2524,14 @@ class UltimateAutoApp:
 
         with col1:
             margins = [p.margin for p in products]
-            fig = go.Figure(data=[go.Histogram(x=margins, nbinsx=30, marker_color='#667eea')])
-            fig.add_vline(x=0, line_dash="dash", line_color="red")
-            fig.add_vline(x=20, line_dash="dash", line_color="green")
-            fig.update_layout(title='📊 Распределение маржинальности', height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            if margins:
+                fig = go.Figure(data=[go.Histogram(x=margins, nbinsx=30, marker_color='#667eea')])
+                fig.add_vline(x=0, line_dash="dash", line_color="red")
+                fig.add_vline(x=20, line_dash="dash", line_color="green")
+                fig.update_layout(title='📊 Распределение маржинальности', height=350)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Нет данных о маржинальности")
 
         with col2:
             abc_counts = {"A": 0, "B": 0, "C": 0}
@@ -2618,22 +2539,28 @@ class UltimateAutoApp:
                 if p.abc_category in abc_counts:
                     abc_counts[p.abc_category] += 1
 
-            fig = px.pie(values=list(abc_counts.values()), names=list(abc_counts.keys()),
-                        title='🎯 ABC-распределение',
-                        color_discrete_map={"A": "#FF6B6B", "B": "#FFD93D", "C": "#6BCF7F"})
-            fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            if sum(abc_counts.values()) > 0:
+                fig = px.pie(values=list(abc_counts.values()), names=list(abc_counts.keys()),
+                            title='🎯 ABC-распределение',
+                            color_discrete_map={"A": "#FF6B6B", "B": "#FFD93D", "C": "#6BCF7F"})
+                fig.update_layout(height=350)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Нет данных для ABC-распределения")
 
         st.subheader("🏆 Топ-10 по прибыли")
         top = sorted(products, key=lambda x: x.unit_profit, reverse=True)[:10]
-        df_top = pd.DataFrame([{
-            "Артикул": p.article, "Название": p.name[:40],
-            "Цена": f"{p.price:,.0f} ₽", "Прибыль": f"{p.unit_profit:,.0f} ₽",
-            "CM %": f"{p.contribution_margin_pct:.1f}%",
-            "Маржа": f"{p.margin:.1f}%", "ABC": p.abc_category,
-            "Лучший МП": p.best_marketplace, "Тренд": p.demand_trend
-        } for p in top])
-        st.dataframe(df_top, use_container_width=True, hide_index=True)
+        if top:
+            df_top = pd.DataFrame([{
+                "Артикул": p.article, "Название": p.name[:40],
+                "Цена": f"{p.price:,.0f} ₽", "Прибыль": f"{p.unit_profit:,.0f} ₽",
+                "CM %": f"{p.contribution_margin_pct:.1f}%",
+                "Маржа": f"{p.margin:.1f}%", "ABC": p.abc_category,
+                "Лучший МП": p.best_marketplace, "Тренд": p.demand_trend
+            } for p in top])
+            st.dataframe(df_top, use_container_width=True, hide_index=True)
+        else:
+            st.info("Нет данных для отображения топа по прибыли")
 
         alerts = self.notification_manager.generate_alerts(products)
         if alerts:
@@ -2839,12 +2766,15 @@ class UltimateAutoApp:
         mp_names = list(mp_stats.keys())
         mp_profits = [mp_stats[mp]["profit"] for mp in mp_names]
 
-        fig = px.bar(x=mp_names, y=mp_profits,
-                    title='💰 Суммарная прибыль по маркетплейсам',
-                    labels={'x': 'Маркетплейс', 'y': 'Прибыль, ₽'},
-                    color=mp_profits, color_continuous_scale='Viridis')
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        if mp_profits and sum(mp_profits) > 0:
+            fig = px.bar(x=mp_names, y=mp_profits,
+                        title='💰 Суммарная прибыль по маркетплейсам',
+                        labels={'x': 'Маркетплейс', 'y': 'Прибыль, ₽'},
+                        color=mp_profits, color_continuous_scale='Viridis')
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Нет данных о прибыли по маркетплейсам")
 
         st.markdown("### 📋 Детальная статистика")
         df = pd.DataFrame([{
@@ -2923,12 +2853,15 @@ class UltimateAutoApp:
 
         col1, col2 = st.columns(2)
         with col1:
-            fig = px.pie(values=list(pl['expenses'].values()),
-                        names=list(pl['expenses'].keys()),
-                        title='📊 Структура расходов',
-                        hole=0.4)
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            if pl['expenses'] and sum(pl['expenses'].values()) > 0:
+                fig = px.pie(values=list(pl['expenses'].values()),
+                            names=list(pl['expenses'].keys()),
+                            title='📊 Структура расходов',
+                            hole=0.4)
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Нет данных о расходах для отображения")
 
         with col2:
             fig = go.Figure(go.Waterfall(
@@ -2947,16 +2880,25 @@ class UltimateAutoApp:
             st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("### 📋 Детализация")
+        
+        # Исправлено: проверка на деление на ноль
+        revenue = pl['revenue'] if pl['revenue'] > 0 else 1
+        
         df = pd.DataFrame([{
-            "Показатель": "Выручка", "Сумма": f"{pl['revenue']:,.0f} ₽", "%": "100%"
+            "Показатель": "Выручка", 
+            "Сумма": f"{pl['revenue']:,.0f} ₽", 
+            "%": "100%"
         }, {
-            "Показатель": "Себестоимость", "Сумма": f"{pl['cogs']:,.0f} ₽",
-            "%": f"{pl['cogs']/pl['revenue']*100:.1f}%"
+            "Показатель": "Себестоимость", 
+            "Сумма": f"{pl['cogs']:,.0f} ₽",
+            "%": f"{pl['cogs']/revenue*100:.1f}%"
         }, {
-            "Показатель": "Валовая прибыль", "Сумма": f"{pl['gross_profit']:,.0f} ₽",
+            "Показатель": "Валовая прибыль", 
+            "Сумма": f"{pl['gross_profit']:,.0f} ₽",
             "%": f"{pl['gross_margin']:.1f}%"
         }, {
-            "Показатель": "Операционная прибыль", "Сумма": f"{pl['operating_profit']:,.0f} ₽",
+            "Показатель": "Операционная прибыль", 
+            "Сумма": f"{pl['operating_profit']:,.0f} ₽",
             "%": f"{pl['operating_margin']:.1f}%"
         }])
         st.dataframe(df, use_container_width=True, hide_index=True)
