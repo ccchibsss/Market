@@ -613,6 +613,20 @@ class UnitEconomicsAnalyzer:
 
     def analyze_portfolio(self, products: List[ProductBatch]) -> Dict:
         """Анализ юнит-экономики всего портфеля"""
+        if not products:
+            return {
+                "total_revenue": 0,
+                "total_variable_costs": 0,
+                "total_profit": 0,
+                "avg_cm_pct": 0,
+                "avg_ltv_cac": 0,
+                "avg_drr": 0,
+                "avg_payback_days": 0,
+                "cm_distribution": {},
+                "top_by_cm": [],
+                "products_count": 0
+            }
+
         total_revenue = sum(p.price for p in products)
         total_variable_costs = sum(p.total_variable_costs for p in products)
         total_profit = sum(p.unit_profit for p in products)
@@ -767,6 +781,9 @@ class InventoryAnalyzer:
     
     def abc_analysis(self, products: List[ProductBatch]) -> Dict:
         """ABC-анализ - учитывает все товары, включая убыточные"""
+        if not products:
+            return {"A": [], "B": [], "C": []}
+
         sorted_products = sorted(products, key=lambda x: x.unit_profit, reverse=True)
         
         total_abs_profit = sum(abs(p.unit_profit) for p in sorted_products)
@@ -1084,6 +1101,20 @@ class PLReportGenerator:
     
     def generate(self, products: List[ProductBatch]) -> Dict:
         """Генерация P&L отчёта"""
+        if not products:
+            return {
+                "revenue": 0,
+                "cogs": 0,
+                "gross_profit": 0,
+                "gross_margin": 0,
+                "expenses": {},
+                "total_expenses": 0,
+                "operating_profit": 0,
+                "operating_margin": 0,
+                "products_count": 0,
+                "avg_check": 0
+            }
+
         total_revenue = sum(p.price for p in products)
         total_cogs = sum(p.cost for p in products)
         total_commission = sum(p.commission for p in products)
@@ -1137,6 +1168,15 @@ class ABTestSimulator:
     
     def run_test(self, products: List[ProductBatch], test_days: int = 14) -> Dict:
         """Запуск A/B/C теста"""
+        if not products:
+            return {
+                "tests": [],
+                "total_uplift": 0,
+                "recommended_strategy": "Нет данных",
+                "test_days": test_days,
+                "statistical_significance": False
+            }
+
         top_products = sorted(products, key=lambda x: x.price * 10, reverse=True)[:20]
         
         results = []
@@ -1186,7 +1226,7 @@ class ABTestSimulator:
                           groups["A (текущая)"]["profit"] * 100) if groups["A (текущая)"]["profit"] > 0 else 0
             })
         
-        total_uplift = np.mean([r["uplift"] for r in results])
+        total_uplift = np.mean([r["uplift"] for r in results]) if results else 0
         best_strategy = "B (+10%)" if total_uplift > 5 else "C (-5%)" if total_uplift < -3 else "A (текущая)"
         
         return {
@@ -1227,6 +1267,9 @@ class NotificationManager:
     @staticmethod
     def generate_alerts(products: List[ProductBatch]) -> List[Dict]:
         """Генерация алертов по товарам"""
+        if not products:
+            return []
+
         alerts = []
 
         critical_stock = [p for p in products if "Критический" in p.stock_status]
@@ -1289,6 +1332,9 @@ class AIAnalyzer:
 
     def analyze_products(self, products: List[ProductBatch]) -> List[ProductBatch]:
         """AI анализ товаров"""
+        if not products:
+            return products
+
         products_to_analyze = products[:CONFIG['max_ai_products']]
 
         products_data = [{
@@ -2012,7 +2058,8 @@ class UltimateAutoApp:
                    help="Загрузить тестовые данные для ознакомления"):
             self._load_demo_data()
 
-        if st.session_state.get('results') is not None:
+        # ИСПРАВЛЕНО: проверка на наличие данных перед отображением аналитики
+        if st.session_state.get('results') is not None and len(st.session_state.results) > 0:
             self._render_analytics()
         else:
             self._render_welcome()
@@ -2226,7 +2273,8 @@ class UltimateAutoApp:
         """Рендер аналитических вкладок"""
         products = st.session_state.results
 
-        if not products:
+        # ИСПРАВЛЕНО: проверка на наличие данных
+        if products is None or len(products) == 0:
             st.warning("⚠️ Нет данных для отображения. Загрузите файл или используйте демо-данные.")
             return
 
