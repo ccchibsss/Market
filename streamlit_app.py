@@ -769,8 +769,7 @@ class MyProductTracker:
     """
     Отслеживает ТОЛЬКО ваши товары на маркетплейсах
     
-    💡 Подсказка: Используйте для проверки наличия ваших товаров на маркетплейсах
-    """
+    💡 Подсказка: Используйте для проверки наличия ваших товаров на маркетплейсах    """
     
     def __init__(self, use_selenium: bool = True):
         self.use_selenium = use_selenium and SELENIUM_AVAILABLE
@@ -2266,7 +2265,7 @@ class UltimateAutoApp:
             'selenium_results': None,
             'ab_test_result': None,
             'use_selenium': False,
-            'headless': False,
+            'headless': True,
             'marketplace': "Ozon",
             'scheme': "FBO",
             'category': "расходники",
@@ -2392,7 +2391,7 @@ class UltimateAutoApp:
         """, unsafe_allow_html=True)
 
     def _render_sidebar(self):
-        """Боковая панель с настройками"""
+        """Боковая панель с настройками (ИСПРАВЛЕНО)"""
         st.markdown("### ⚙️ Настройки")
         
         st.markdown("""
@@ -2405,7 +2404,7 @@ class UltimateAutoApp:
         # API КЛЮЧИ
         st.subheader("🔑 API Ключи")
 
-        deepseek_key = st.text_input(
+        st.text_input(
             "DeepSeek API ключ",
             type="password",
             placeholder="sk-...",
@@ -2413,8 +2412,8 @@ class UltimateAutoApp:
             help="Получите ключ на platform.deepseek.com"
         )
 
-        if deepseek_key:
-            self.ai_analyzer = AIAnalyzer(deepseek_key)
+        if st.session_state.deepseek_key:
+            self.ai_analyzer = AIAnalyzer(st.session_state.deepseek_key)
             st.success("✅ DeepSeek подключён")
 
         with st.expander("📧 Email для уведомлений"):
@@ -2423,9 +2422,9 @@ class UltimateAutoApp:
             <span class="tooltiptext">Используйте пароль приложения Google для безопасности</span>
             </span>
             """, unsafe_allow_html=True)
-            email_login = st.text_input("Email (отправитель)", key="email_login")
-            email_password = st.text_input("Пароль приложения", type="password", key="email_password")
-            email_to = st.text_input("Куда отправлять", key="email_to")
+            st.text_input("Email (отправитель)", key="email_login")
+            st.text_input("Пароль приложения", type="password", key="email_password")
+            st.text_input("Куда отправлять", key="email_to")
 
         st.markdown("---")
 
@@ -2434,14 +2433,20 @@ class UltimateAutoApp:
 
         if SELENIUM_AVAILABLE:
             st.success("✅ Selenium установлен")
-            use_selenium = st.checkbox("Использовать парсинг", True, key="use_sel",
-                                      help="Парсинг через Selenium WebDriver")
-            st.session_state.use_selenium = use_selenium
+            st.checkbox(
+                "Использовать парсинг", 
+                value=st.session_state.use_selenium,
+                key="use_selenium",
+                help="Парсинг через Selenium WebDriver"
+            )
 
-            if use_selenium:
-                headless = st.checkbox("Headless режим", True, key="headless",
-                                      help="Запуск браузера в фоновом режиме")
-                st.session_state.headless = headless
+            if st.session_state.use_selenium:
+                st.checkbox(
+                    "Headless режим", 
+                    value=st.session_state.headless,
+                    key="headless",
+                    help="Запуск браузера в фоновом режиме"
+                )
         else:
             st.warning("⚠️ Selenium не установлен")
             st.code("pip install selenium webdriver-manager", language="bash")
@@ -2458,17 +2463,91 @@ class UltimateAutoApp:
         </span>
         """, unsafe_allow_html=True)
         
-        marketplace = st.selectbox("Маркетплейс", CONFIG['supported_marketplaces'], key="mp")
-        scheme = st.selectbox("Схема", ["FBO", "FBS", "DBS"], key="scheme")
-        category = st.selectbox("Категория", ["расходники", "аксессуары", "электроника", "химия", "запчасти"])
-        season = st.selectbox("Сезон", ['всесезон', 'лето', 'зима', 'весна', 'осень'])
-        quality = st.slider("Качество (0-100)", 0, 100, 70)
-        days_storage = st.number_input("Хранение (дней)", 1, 180, 30)
-        include_acquiring = st.checkbox("Эквайринг", True)
-        include_advertising = st.checkbox("Реклама", False)
-        advertising_rate = st.slider("ДРР (%)", 0, 50, 15) / 100 if include_advertising else 0
+        marketplace_idx = 0
+        if st.session_state.marketplace in CONFIG['supported_marketplaces']:
+            marketplace_idx = CONFIG['supported_marketplaces'].index(st.session_state.marketplace)
+        
+        st.selectbox(
+            "Маркетплейс", 
+            CONFIG['supported_marketplaces'], 
+            index=marketplace_idx,
+            key="marketplace"
+        )
+        
+        scheme_idx = 0
+        schemes = ["FBO", "FBS", "DBS"]
+        if st.session_state.scheme in schemes:
+            scheme_idx = schemes.index(st.session_state.scheme)
+        
+        st.selectbox(
+            "Схема", 
+            schemes,
+            index=scheme_idx,
+            key="scheme"
+        )
+        
+        categories = ["расходники", "аксессуары", "электроника", "химия", "запчасти"]
+        category_idx = 0
+        if st.session_state.category in categories:
+            category_idx = categories.index(st.session_state.category)
+        
+        st.selectbox(
+            "Категория", 
+            categories,
+            index=category_idx,
+            key="category"
+        )
+        
+        seasons = ['всесезон', 'лето', 'зима', 'весна', 'осень']
+        season_idx = 0
+        if st.session_state.season in seasons:
+            season_idx = seasons.index(st.session_state.season)
+        
+        st.selectbox(
+            "Сезон", 
+            seasons,
+            index=season_idx,
+            key="season"
+        )
+        
+        st.slider(
+            "Качество (0-100)", 
+            0, 100, 
+            value=st.session_state.quality,
+            key="quality"
+        )
+        
+        st.number_input(
+            "Хранение (дней)", 
+            1, 180, 
+            value=st.session_state.days_storage,
+            key="days_storage"
+        )
+        
+        st.checkbox(
+            "Эквайринг", 
+            value=st.session_state.include_acquiring,
+            key="include_acquiring"
+        )
+        
+        st.checkbox(
+            "Реклама", 
+            value=st.session_state.include_advertising,
+            key="include_advertising"
+        )
+        
+        if st.session_state.include_advertising:
+            advertising_rate = st.slider(
+                "ДРР (%)", 
+                0, 50, 
+                value=int(st.session_state.advertising_rate * 100),
+                key="advertising_rate"
+            ) / 100
+            st.session_state.advertising_rate = advertising_rate
+        else:
+            st.session_state.advertising_rate = 0
 
-        # 🆕 ПАРАМЕТРЫ ЮНИТ-ЭКОНОМИКИ
+        # ПАРАМЕТРЫ ЮНИТ-ЭКОНОМИКИ
         st.markdown("---")
         st.subheader("💎 Юнит-экономика")
         
@@ -2478,23 +2557,21 @@ class UltimateAutoApp:
         </span>
         """, unsafe_allow_html=True)
         
-        fixed_costs = st.number_input("Постоянные расходы/мес (₽)", 0, 1000000, 50000,
-                                     help="Аренда, зарплаты, офис и т.д.")
-        avg_orders = st.number_input("Среднее кол-во заказов/мес", 10, 10000, 100,
-                                    help="Используется для расчета окупаемости")
-
-        # Сохраняем в session_state
-        st.session_state.marketplace = marketplace
-        st.session_state.scheme = scheme
-        st.session_state.category = category
-        st.session_state.season = season
-        st.session_state.quality = quality
-        st.session_state.days_storage = days_storage
-        st.session_state.include_acquiring = include_acquiring
-        st.session_state.include_advertising = include_advertising
-        st.session_state.advertising_rate = advertising_rate
-        st.session_state.fixed_costs = fixed_costs
-        st.session_state.avg_orders = avg_orders
+        st.number_input(
+            "Постоянные расходы/мес (₽)", 
+            0, 1000000, 
+            value=st.session_state.fixed_costs,
+            key="fixed_costs",
+            help="Аренда, зарплаты, офис и т.д."
+        )
+        
+        st.number_input(
+            "Среднее кол-во заказов/мес", 
+            10, 10000, 
+            value=st.session_state.avg_orders,
+            key="avg_orders",
+            help="Используется для расчета окупаемости"
+        )
 
         st.markdown("---")
         st.caption(f"🕐 {datetime.now().strftime('%d.%m.%Y %H:%M')}")
