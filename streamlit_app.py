@@ -1,12 +1,16 @@
 """
 ================================================================================
-🚀 ULTIMATE UNIT ECONOMICS ENGINE v48.1 - ИСПРАВЛЕНИЕ ОШИБОК
+🚀 ULTIMATE UNIT ECONOMICS ENGINE v49.0 - ПОЛНАЯ ВЕРСИЯ
 ================================================================================
-📌 ВЕРСИЯ: 48.1.0
-📌 ИСПРАВЛЕНИЯ:
-    ✅ Исправлены дублирующиеся ID в selectbox
-    ✅ Обновлен use_container_width на width
-    ✅ Добавлены уникальные ключи для всех элементов
+📌 ВЕРСИЯ: 49.0.0
+📌 НОВЫЕ ФУНКЦИИ:
+    ✅ Добавлен столбец ВЕС в основной файл
+    ✅ Добавлены КАТЕГОРИИ и ШТРИХКОДЫ в справочный файл
+    ✅ Автопоиск категории по наименованию
+    ✅ Загрузка готового файла и добавление новых данных
+    ✅ Конвертация размеров мм/см
+    ✅ Улучшенный парсинг конкурентов
+    ✅ Полная интеграция с API
 ================================================================================
 """
 
@@ -89,7 +93,7 @@ except ImportError:
 # КОНФИГУРАЦИЯ
 # --------------------------------------------
 CONFIG = {
-    "version": "48.1.0",
+    "version": "49.0.0",
     "app_name": "🚀 Юнит-экономика с конвертацией размеров",
     "currency": "₽",
     "marketplaces": ["Яндекс Маркет", "Ozon", "Wildberries", "AliExpress", "Мегамаркет"],
@@ -129,6 +133,12 @@ CONFIG = {
         r'[A-Z]{2}[0-9]{4}[A-Z]{2}',
         r'[0-9]{4}[A-Z]{2}[0-9]{4}'
     ],
+    "barcode_patterns": [
+        r'[0-9]{8}',
+        r'[0-9]{12}',
+        r'[0-9]{13}',
+        r'[0-9]{14}'
+    ],
     "validation": {
         "min_price": 10,
         "max_price": 1000000,
@@ -137,7 +147,9 @@ CONFIG = {
         "min_dimension": 0.1,
         "max_dimension": 1000,
         "min_volume": 0.001,
-        "max_volume": 10000
+        "max_volume": 10000,
+        "min_weight": 0.001,
+        "max_weight": 1000
     },
     "api": {
         "cache_ttl": 300,
@@ -239,6 +251,28 @@ def generate_cache_key(*args) -> str:
     """Генерация ключа для кэша"""
     key = "|".join(str(arg) for arg in args)
     return hashlib.md5(key.encode()).hexdigest()
+
+def is_valid_barcode(barcode: str) -> bool:
+    """Проверка валидности штрихкода"""
+    if not barcode:
+        return False
+    barcode = re.sub(r'[^\d]', '', barcode)
+    if len(barcode) not in [8, 12, 13, 14]:
+        return False
+    return True
+
+def format_barcode(barcode: str) -> str:
+    """Форматирование штрихкода"""
+    if not barcode:
+        return ""
+    barcode = re.sub(r'[^\d]', '', barcode)
+    if len(barcode) == 13:
+        return f"{barcode[:3]} {barcode[3:7]} {barcode[7:11]} {barcode[11:]}"
+    elif len(barcode) == 12:
+        return f"{barcode[:2]} {barcode[2:6]} {barcode[6:10]} {barcode[10:]}"
+    elif len(barcode) == 8:
+        return f"{barcode[:2]} {barcode[2:5]} {barcode[5:]}"
+    return barcode
 
 # --------------------------------------------
 # 📊 КЭШИРОВАНИЕ API
@@ -524,7 +558,7 @@ class GoogleSheetsExporter:
         
         try:
             headers = [
-                "Артикул", "Наименование", "Бренд", "OE номер", "Категория",
+                "Артикул", "Наименование", "Бренд", "OE номер", "Категория", "Штрихкод",
                 "Цена", "Себестоимость", "Прибыль", "Маржа %", "ROI %",
                 "Статус", "ABC", "Рекомендуемая цена", "Действие"
             ]
@@ -537,6 +571,7 @@ class GoogleSheetsExporter:
                     r.get('brand', ''),
                     r.get('oe_number', ''),
                     r.get('category', ''),
+                    r.get('barcode', ''),
                     r.get('price', 0),
                     r.get('cost', 0),
                     r.get('unit_profit', 0),
@@ -551,7 +586,7 @@ class GoogleSheetsExporter:
             ws = self.sheet.get_worksheet(0)
             ws.clear()
             ws.update([headers] + data)
-            ws.format('A1:N1', {'textFormat': {'bold': True}})
+            ws.format('A1:O1', {'textFormat': {'bold': True}})
             
             return {
                 "status": "success",
@@ -677,7 +712,8 @@ class YandexMarketAPI(BaseMarketplaceAPI):
                     "offerId": product_data.get('offer_id', ''),
                     "name": product_data.get('name', ''),
                     "price": product_data.get('price', 0),
-                    "category": product_data.get('category', '')
+                    "category": product_data.get('category', ''),
+                    "barcode": product_data.get('barcode', '')
                 }
             }]
         }
@@ -754,7 +790,8 @@ class OzonAPI(BaseMarketplaceAPI):
             "name": product_data.get('name', ''),
             "price": product_data.get('price', 0),
             "category": product_data.get('category', ''),
-            "offer_id": product_data.get('offer_id', '')
+            "offer_id": product_data.get('offer_id', ''),
+            "barcode": product_data.get('barcode', '')
         }
         return self._request('POST', url, json=data)
 
@@ -820,7 +857,8 @@ class WildberriesAPI(BaseMarketplaceAPI):
             "nm_id": product_data.get('offer_id', ''),
             "name": product_data.get('name', ''),
             "price": product_data.get('price', 0),
-            "category": product_data.get('category', '')
+            "category": product_data.get('category', ''),
+            "barcode": product_data.get('barcode', '')
         }
         return self._request('POST', url, json=data)
 
@@ -888,7 +926,8 @@ class OEMDatabase:
                 "compatibility": ["BMW 3", "BMW 5", "Audi A4", "Audi A6", "VW Passat"],
                 "weight": 0.35,
                 "dimensions": {"length": 100, "width": 80, "height": 50},
-                "cross_reference": ["MANN W842/2", "MAHLE OC 205"]
+                "cross_reference": ["MANN W842/2", "MAHLE OC 205"],
+                "barcode": "1234567890123"
             },
             "W842/2": {
                 "category": "Фильтры",
@@ -897,7 +936,8 @@ class OEMDatabase:
                 "compatibility": ["BMW 3", "BMW 5", "Audi A4", "Audi A6", "VW Passat"],
                 "weight": 0.32,
                 "dimensions": {"length": 95, "width": 75, "height": 48},
-                "cross_reference": ["BOSCH 0986AF0059", "MAHLE OC 205"]
+                "cross_reference": ["BOSCH 0986AF0059", "MAHLE OC 205"],
+                "barcode": "1234567890124"
             },
             "OC205": {
                 "category": "Фильтры",
@@ -906,7 +946,8 @@ class OEMDatabase:
                 "compatibility": ["BMW 3", "BMW 5", "Audi A4", "Audi A6", "VW Passat"],
                 "weight": 0.33,
                 "dimensions": {"length": 98, "width": 78, "height": 49},
-                "cross_reference": ["BOSCH 0986AF0059", "MANN W842/2"]
+                "cross_reference": ["BOSCH 0986AF0059", "MANN W842/2"],
+                "barcode": "1234567890125"
             },
             "AB123456789": {
                 "category": "Тормозная система",
@@ -915,7 +956,8 @@ class OEMDatabase:
                 "compatibility": ["VW Golf", "VW Passat", "Skoda Octavia", "Audi A3"],
                 "weight": 1.2,
                 "dimensions": {"length": 150, "width": 120, "height": 30},
-                "cross_reference": ["BREMBO P85012", "ATE 13.0460-1234.2"]
+                "cross_reference": ["BREMBO P85012", "ATE 13.0460-1234.2"],
+                "barcode": "1234567890126"
             },
             "5524": {
                 "category": "Свечи зажигания",
@@ -924,7 +966,8 @@ class OEMDatabase:
                 "compatibility": ["BMW 3", "BMW 5", "Audi A4", "VW Golf", "Toyota Camry"],
                 "weight": 0.05,
                 "dimensions": {"length": 50, "width": 20, "height": 20},
-                "cross_reference": ["BOSCH FR7DC", "DENSO K16PR-U11"]
+                "cross_reference": ["BOSCH FR7DC", "DENSO K16PR-U11"],
+                "barcode": "1234567890127"
             },
             "1234567890": {
                 "category": "Стеклоочистители",
@@ -933,7 +976,8 @@ class OEMDatabase:
                 "compatibility": ["BMW 3", "BMW 5", "Audi A4", "VW Passat"],
                 "weight": 0.25,
                 "dimensions": {"length": 500, "width": 30, "height": 20},
-                "cross_reference": ["BOSCH 3397007405", "SWF 119-000-016"]
+                "cross_reference": ["BOSCH 3397007405", "SWF 119-000-016"],
+                "barcode": "1234567890128"
             },
             "12345678901": {
                 "category": "Тормозная система",
@@ -942,7 +986,8 @@ class OEMDatabase:
                 "compatibility": ["BMW 3", "BMW 5", "Audi A4", "VW Passat"],
                 "weight": 8.5,
                 "dimensions": {"length": 300, "width": 300, "height": 25},
-                "cross_reference": ["BREMBO 09.9870.10", "BOSCH 0986AB8765"]
+                "cross_reference": ["BREMBO 09.9870.10", "BOSCH 0986AB8765"],
+                "barcode": "1234567890129"
             },
             "6PK1735": {
                 "category": "Ремни и цепи",
@@ -951,7 +996,8 @@ class OEMDatabase:
                 "compatibility": ["Audi A4", "Audi A6", "VW Passat", "Skoda Octavia"],
                 "weight": 0.15,
                 "dimensions": {"length": 1735, "width": 6, "height": 6},
-                "cross_reference": ["GATES 6PK1735", "DAYCO 6PK1735"]
+                "cross_reference": ["GATES 6PK1735", "DAYCO 6PK1735"],
+                "barcode": "1234567890130"
             }
         }
         
@@ -969,7 +1015,8 @@ class OEMDatabase:
                     "length": random.randint(50, 500),
                     "width": random.randint(20, 400),
                     "height": random.randint(10, 200)
-                }
+                },
+                "barcode": f"{random.randint(1000000000000, 9999999999999)}"
             }
     
     def _save_database(self):
@@ -1022,6 +1069,11 @@ class OEMDatabase:
         data = self.get_by_oe(oe_number)
         return data.get("compatibility", []) if data else []
     
+    def get_barcode(self, oe_number: str) -> str:
+        """Получение штрихкода по OE номеру"""
+        data = self.get_by_oe(oe_number)
+        return data.get("barcode", "") if data else ""
+    
     def add_or_update(self, oe_number: str, data: Dict):
         """Добавление или обновление записи в базе"""
         oe_number = oe_number.strip().upper()
@@ -1066,7 +1118,7 @@ class OEMDatabase:
         return stats
 
 # --------------------------------------------
-# 🕷️ ПАРСЕРЫ ЦЕН КОНКУРЕНТОВ
+# 🕷️ ПАРСЕРЫ ЦЕН КОНКУРЕНТОВ (УЛУЧШЕННЫЙ)
 # --------------------------------------------
 class CompetitorParser:
     """Парсинг цен конкурентов с маркетплейсов"""
@@ -1075,139 +1127,342 @@ class CompetitorParser:
         self.cache = APICache()
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1'
         })
-    
+        self.retry_count = 3
+        self.timeout = 15
+        
     @st.cache_data(ttl=300)
     def parse_yandex_market(_self, query: str, max_pages: int = 2) -> List[Dict]:
-        """Парсинг Яндекс Маркета"""
+        """Парсинг Яндекс Маркета (улучшенный)"""
         results = []
         
         for page in range(1, max_pages + 1):
-            try:
-                url = "https://market.yandex.ru/search"
-                params = {'text': query, 'page': page}
-                
-                response = _self.session.get(url, params=params, timeout=20)
-                if response.status_code != 200:
-                    continue
-                
-                html = response.text
-                items = re.findall(r'"offerId":"([^"]+)","name":"([^"]+)","price":"([^"]+)"', html)
-                
-                for offer_id, name, price in items[:10]:
-                    results.append({
-                        'marketplace': 'Яндекс Маркет',
-                        'offer_id': offer_id,
-                        'name': name,
-                        'price': safe_float(price),
-                        'parsed_at': datetime.now().isoformat()
-                    })
-                
-                time.sleep(0.3)
-                
-            except Exception as e:
-                logger.error(f"Yandex parse error: {e}")
+            for attempt in range(_self.retry_count):
+                try:
+                    url = "https://market.yandex.ru/search"
+                    params = {
+                        'text': query,
+                        'page': page,
+                        'rs': 'eJwzrLDM1QAAGm0B_Q'
+                    }
+                    
+                    time.sleep(random.uniform(1, 3))
+                    
+                    response = _self.session.get(url, params=params, timeout=_self.timeout)
+                    
+                    if response.status_code != 200:
+                        if response.status_code == 429:
+                            time.sleep(5)
+                            continue
+                        break
+                    
+                    html = response.text
+                    
+                    json_match = re.search(r'window\.__initialState\s*=\s*({.*?});', html, re.DOTALL)
+                    if json_match:
+                        try:
+                            data = json.loads(json_match.group(1))
+                            products = _self._extract_yandex_products_from_json(data)
+                            for product in products[:10]:
+                                if product.get('price', 0) > 0:
+                                    results.append({
+                                        'marketplace': 'Яндекс Маркет',
+                                        'offer_id': product.get('id', ''),
+                                        'name': product.get('name', ''),
+                                        'price': product.get('price', 0),
+                                        'url': product.get('url', ''),
+                                        'parsed_at': datetime.now().isoformat()
+                                    })
+                        except:
+                            pass
+                    
+                    if not results or len(results) < 5:
+                        product_pattern = r'<article[^>]*data-zone-name="[^"]*product[^"]*"[^>]*>.*?<h3[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>.*?</h3>.*?<span[^>]*class="[^"]*price[^"]*"[^>]*>([0-9\s]+)</span>'
+                        matches = re.findall(product_pattern, html, re.DOTALL)
+                        
+                        for url, name, price in matches[:10]:
+                            price_clean = re.sub(r'[^\d]', '', price)
+                            if price_clean:
+                                results.append({
+                                    'marketplace': 'Яндекс Маркет',
+                                    'offer_id': url.split('/')[-1] if '/' in url else '',
+                                    'name': re.sub(r'<[^>]+>', '', name).strip(),
+                                    'price': float(price_clean),
+                                    'url': 'https://market.yandex.ru' + url if url.startswith('/') else url,
+                                    'parsed_at': datetime.now().isoformat()
+                                })
+                    
+                    if not results:
+                        results = _self._generate_demo_results("Яндекс Маркет", query, 5)
+                    
+                    break
+                    
+                except Exception as e:
+                    logger.error(f"Yandex parse error (attempt {attempt+1}): {e}")
+                    time.sleep(2)
+            
+            if len(results) >= 20:
+                break
         
         return results
+    
+    def _extract_yandex_products_from_json(self, data: Dict) -> List[Dict]:
+        """Извлечение товаров из JSON Яндекс Маркета"""
+        products = []
+        
+        try:
+            search_results = data.get('search', {}).get('results', [])
+            if not search_results:
+                search_results = data.get('searchResults', {}).get('items', [])
+            
+            for item in search_results:
+                if isinstance(item, dict):
+                    product = {
+                        'id': item.get('id', ''),
+                        'name': item.get('name', ''),
+                        'price': item.get('price', {}).get('value', 0),
+                        'url': item.get('url', '')
+                    }
+                    if product.get('price', 0) > 0:
+                        products.append(product)
+        except:
+            pass
+        
+        return products
     
     @st.cache_data(ttl=300)
     def parse_ozon(_self, query: str, max_pages: int = 2) -> List[Dict]:
-        """Парсинг Ozon"""
+        """Парсинг Ozon (улучшенный)"""
         results = []
         
         for page in range(1, max_pages + 1):
-            try:
-                url = "https://www.ozon.ru/api/composer-api.bx/page/json/v2"
-                params = {'url': f'/search/?text={urllib.parse.quote(query)}&page={page}'}
-                
-                response = _self.session.get(url, params=params, timeout=20)
-                if response.status_code != 200:
-                    continue
-                
-                data = response.json()
-                widgets = data.get('widgets', [])
-                
-                for widget in widgets:
-                    if widget.get('type') == 'searchResultsV2':
-                        items = widget.get('items', [])
-                        for item in items[:10]:
-                            results.append({
-                                'marketplace': 'Ozon',
-                                'product_id': item.get('id'),
-                                'name': item.get('name', ''),
-                                'price': safe_float(item.get('price', {}).get('price', 0)),
-                                'parsed_at': datetime.now().isoformat()
-                            })
-                
-                time.sleep(0.3)
-                
-            except Exception as e:
-                logger.error(f"Ozon parse error: {e}")
+            for attempt in range(_self.retry_count):
+                try:
+                    url = f"https://www.ozon.ru/search/"
+                    params = {
+                        'text': query,
+                        'page': page,
+                        'sorting': 'relevance'
+                    }
+                    
+                    time.sleep(random.uniform(1.5, 3))
+                    
+                    response = _self.session.get(url, params=params, timeout=_self.timeout)
+                    
+                    if response.status_code != 200:
+                        if response.status_code == 429:
+                            time.sleep(5)
+                            continue
+                        break
+                    
+                    html = response.text
+                    
+                    json_patterns = [
+                        r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+                        r'<script[^>]*type="application/json"[^>]*>(.*?)</script>',
+                        r'window\.__INITIAL_STATE__\s*=\s*({.*?});'
+                    ]
+                    
+                    for pattern in json_patterns:
+                        match = re.search(pattern, html, re.DOTALL)
+                        if match:
+                            try:
+                                data = json.loads(match.group(1))
+                                products = _self._extract_ozon_products_from_json(data)
+                                for product in products[:10]:
+                                    if product.get('price', 0) > 0:
+                                        results.append({
+                                            'marketplace': 'Ozon',
+                                            'product_id': product.get('id', ''),
+                                            'name': product.get('name', ''),
+                                            'price': product.get('price', 0),
+                                            'url': product.get('url', ''),
+                                            'parsed_at': datetime.now().isoformat()
+                                        })
+                                break
+                            except:
+                                continue
+                    
+                    if not results:
+                        product_pattern = r'<div[^>]*data-widget="[^"]*searchResultsV2[^"]*"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>.*?<span[^>]*class="[^"]*tsBody500Medium[^"]*"[^>]*>(.*?)</span>.*?<span[^>]*class="[^"]*tsBodyL[^"]*"[^>]*>([0-9\s]+)</span>'
+                        matches = re.findall(product_pattern, html, re.DOTALL)
+                        
+                        for url, name, price in matches[:10]:
+                            price_clean = re.sub(r'[^\d]', '', price)
+                            if price_clean:
+                                results.append({
+                                    'marketplace': 'Ozon',
+                                    'product_id': url.split('/')[-1] if '/' in url else '',
+                                    'name': re.sub(r'<[^>]+>', '', name).strip(),
+                                    'price': float(price_clean),
+                                    'url': 'https://www.ozon.ru' + url if url.startswith('/') else url,
+                                    'parsed_at': datetime.now().isoformat()
+                                })
+                    
+                    if not results:
+                        results = _self._generate_demo_results("Ozon", query, 5)
+                    
+                    break
+                    
+                except Exception as e:
+                    logger.error(f"Ozon parse error (attempt {attempt+1}): {e}")
+                    time.sleep(2)
+            
+            if len(results) >= 20:
+                break
         
         return results
     
+    def _extract_ozon_products_from_json(self, data: Dict) -> List[Dict]:
+        """Извлечение товаров из JSON Ozon"""
+        products = []
+        
+        try:
+            items = data.get('props', {}).get('pageProps', {}).get('catalog', {}).get('items', [])
+            if not items:
+                items = data.get('catalog', {}).get('items', [])
+            if not items:
+                items = data.get('items', [])
+            
+            for item in items:
+                if isinstance(item, dict):
+                    product = {
+                        'id': item.get('id', item.get('productId', '')),
+                        'name': item.get('name', item.get('title', '')),
+                        'price': item.get('price', {}).get('price', 0) or item.get('price', 0),
+                        'url': item.get('link', item.get('url', ''))
+                    }
+                    if product.get('price', 0) > 0:
+                        products.append(product)
+        except:
+            pass
+        
+        return products
+    
     @st.cache_data(ttl=300)
     def parse_wildberries(_self, query: str, max_pages: int = 2) -> List[Dict]:
-        """Парсинг Wildberries"""
+        """Парсинг Wildberries (улучшенный)"""
         results = []
         
         for page in range(1, max_pages + 1):
-            try:
-                url = "https://search.wb.ru/exactmatch/ru/common/v4/search"
-                params = {'query': query, 'page': page, 'limit': 50}
-                
-                response = _self.session.get(url, params=params, timeout=20)
-                if response.status_code != 200:
-                    continue
-                
-                data = response.json()
-                products = data.get('data', {}).get('products', [])
-                
-                for product in products[:10]:
-                    results.append({
-                        'marketplace': 'Wildberries',
-                        'nm_id': product.get('id'),
-                        'name': product.get('name', ''),
-                        'price': safe_float(product.get('priceU', 0)) / 100,
-                        'parsed_at': datetime.now().isoformat()
-                    })
-                
-                time.sleep(0.3)
-                
-            except Exception as e:
-                logger.error(f"WB parse error: {e}")
+            for attempt in range(_self.retry_count):
+                try:
+                    url = "https://search.wb.ru/exactmatch/ru/common/v4/search"
+                    params = {
+                        'query': query,
+                        'page': page,
+                        'limit': 50,
+                        'currency': 'rub',
+                        'appType': 1,
+                        'lang': 'ru',
+                        'dest': -1257786
+                    }
+                    
+                    time.sleep(random.uniform(1, 2))
+                    
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept': 'application/json',
+                        'Origin': 'https://www.wildberries.ru',
+                        'Referer': 'https://www.wildberries.ru/'
+                    }
+                    
+                    response = _self.session.get(url, params=params, headers=headers, timeout=_self.timeout)
+                    
+                    if response.status_code != 200:
+                        if response.status_code == 429:
+                            time.sleep(5)
+                            continue
+                        break
+                    
+                    data = response.json()
+                    products = data.get('data', {}).get('products', [])
+                    
+                    for product in products[:20]:
+                        price = product.get('priceU', 0)
+                        if price > 0:
+                            results.append({
+                                'marketplace': 'Wildberries',
+                                'nm_id': product.get('id', ''),
+                                'name': product.get('name', ''),
+                                'price': price / 100,
+                                'url': f"https://www.wildberries.ru/catalog/{product.get('id', '')}/detail.aspx",
+                                'parsed_at': datetime.now().isoformat()
+                            })
+                    
+                    if not results:
+                        results = _self._generate_demo_results("Wildberries", query, 5)
+                    
+                    break
+                    
+                except Exception as e:
+                    logger.error(f"WB parse error (attempt {attempt+1}): {e}")
+                    time.sleep(2)
+            
+            if len(results) >= 20:
+                break
+        
+        return results
+    
+    def _generate_demo_results(self, marketplace: str, query: str, count: int = 5) -> List[Dict]:
+        """Генерация демо-результатов для тестирования"""
+        results = []
+        
+        base_prices = [1500, 2300, 890, 3450, 1200, 5600, 780, 2150, 4300, 990]
+        
+        for i in range(min(count, len(base_prices))):
+            price = base_prices[i] * random.uniform(0.8, 1.2)
+            results.append({
+                'marketplace': marketplace,
+                'name': f"{query} (артикул {random.randint(1000, 9999)})",
+                'price': round(price, 2),
+                'parsed_at': datetime.now().isoformat(),
+                'is_demo': True
+            })
         
         return results
     
     def parse_all_marketplaces(self, query: str) -> Dict[str, List[Dict]]:
-        """Парсинг всех маркетплейсов"""
+        """Парсинг всех маркетплейсов с улучшенной обработкой"""
         results = {}
-        results_dict = {}
-        threads = []
         
-        def parse_with_store(marketplace, parser_func):
-            try:
-                results_dict[marketplace] = parser_func(query)
-            except Exception as e:
-                logger.error(f"Error parsing {marketplace}: {e}")
-                results_dict[marketplace] = []
+        try:
+            results['Яндекс Маркет'] = self.parse_yandex_market(query)
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"Yandex parse error: {e}")
+            results['Яндекс Маркет'] = []
         
-        parsers = [
-            ('Яндекс Маркет', self.parse_yandex_market),
-            ('Ozon', self.parse_ozon),
-            ('Wildberries', self.parse_wildberries)
-        ]
+        try:
+            results['Ozon'] = self.parse_ozon(query)
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"Ozon parse error: {e}")
+            results['Ozon'] = []
         
-        for name, func in parsers:
-            thread = Thread(target=parse_with_store, args=(name, func))
-            thread.start()
-            threads.append(thread)
+        try:
+            results['Wildberries'] = self.parse_wildberries(query)
+        except Exception as e:
+            logger.error(f"WB parse error: {e}")
+            results['Wildberries'] = []
         
-        for thread in threads:
-            thread.join(timeout=30)
+        total_items = sum(len(items) for items in results.values())
+        if total_items == 0:
+            logger.info(f"Все маркетплейсы вернули 0 результатов для '{query}', генерируем демо")
+            for marketplace in ['Яндекс Маркет', 'Ozon', 'Wildberries']:
+                results[marketplace] = self._generate_demo_results(marketplace, query, 4)
         
-        return results_dict
+        return results
 
 # --------------------------------------------
 # 🏪 УПРАВЛЕНИЕ КОНКУРЕНТАМИ
@@ -1396,8 +1651,7 @@ class AITariffProvider:
     def _get_ai_rates(self, marketplace: str, mode: str) -> Optional[Dict]:
         """Получение тарифов через AI API"""
         if not self.api_key:
-            return None
-            
+            return None            
         try:
             prompt = f"""
             Предоставь актуальные тарифы для маркетплейса {marketplace} 
@@ -1463,6 +1717,7 @@ class CategoryClassifier:
         self.categories = list(self.keywords.keys())
         self.cache = {}
         self.oem_patterns = CONFIG["oem_patterns"]
+        self.barcode_patterns = CONFIG["barcode_patterns"]
         self.ml_classifier = AutoClassifier() if SKLEARN_AVAILABLE else None
         
     @lru_cache(maxsize=10000)
@@ -1507,6 +1762,17 @@ class CategoryClassifier:
         
         for pattern in self.oem_patterns:
             match = re.search(pattern, name.upper())
+            if match:
+                return match.group()
+        return None
+    
+    def extract_barcode(self, name: str) -> Optional[str]:
+        """Извлечение штрихкода из наименования"""
+        if not name:
+            return None
+        
+        for pattern in self.barcode_patterns:
+            match = re.search(pattern, name)
             if match:
                 return match.group()
         return None
@@ -1573,6 +1839,12 @@ class DataValidator:
             elif value > CONFIG["validation"]["max_dimension"]:
                 warnings.append(f"Подозрительно большая {label.lower()}: {value} мм")
         
+        weight = safe_float(row.get("weight", 0))
+        if weight < 0:
+            errors.append("Вес не может быть отрицательным")
+        elif weight > CONFIG["validation"]["max_weight"]:
+            warnings.append(f"Подозрительно большой вес: {weight} кг")
+        
         name = safe_str(row.get("name", ""))
         if not name:
             warnings.append("Отсутствует наименование товара")
@@ -1580,6 +1852,10 @@ class DataValidator:
         article = safe_str(row.get("article", ""))
         if not article:
             warnings.append("Отсутствует артикул товара")
+        
+        barcode = safe_str(row.get("barcode", ""))
+        if barcode and not is_valid_barcode(barcode):
+            warnings.append(f"Неверный формат штрихкода: {barcode}")
         
         self.stats["total"] += 1
         for error in errors:
@@ -1648,6 +1924,7 @@ class UnitEconomicsEngine:
         self.validator = DataValidator()
         self.competitor_manager = CompetitorManager()
         self.oem_db = OEMDatabase()
+        self.classifier = CategoryClassifier()
     
     def _convert_to_mm(self, value: float) -> float:
         """Конвертация значения в мм"""
@@ -1677,12 +1954,10 @@ class UnitEconomicsEngine:
         name = safe_str(row.get("name", ""))
         price = safe_float(row.get("price", 0))
         
-        # Получаем размеры и конвертируем в мм
         length_orig = safe_float(row.get("length", 0))
         width_orig = safe_float(row.get("width", 0))
         height_orig = safe_float(row.get("height", 0))
         
-        # Конвертируем в мм для расчетов
         length = self._convert_to_mm(length_orig)
         width = self._convert_to_mm(width_orig)
         height = self._convert_to_mm(height_orig)
@@ -1691,11 +1966,16 @@ class UnitEconomicsEngine:
         weight = safe_float(row.get("weight", 0))
         oe_number = safe_str(row.get("oe_number", ""))
         brand = safe_str(row.get("brand", ""))
-        category = safe_str(row.get("category", "Прочее"))
+        category = safe_str(row.get("category", ""))
         compatibility = safe_str(row.get("compatibility", ""))
+        barcode = safe_str(row.get("barcode", ""))
         
         if price <= 0:
             return None
+        
+        # Если категория не указана, ищем по наименованию
+        if not category or category == "" or category == "Прочее":
+            category, confidence = self.classifier.classify(name)
         
         competitor_analysis = self.competitor_manager.analyze_competitor_prices(name, price)
         
@@ -1773,6 +2053,7 @@ class UnitEconomicsEngine:
             "oe_number": oe_number,
             "category": category,
             "compatibility": compatibility,
+            "barcode": barcode,
             "price": round(price, 2),
             "cost": round(cost, 2),
             "length_orig": round(length_orig, 1),
@@ -2040,6 +2321,7 @@ class MarketplaceUploader:
                     "price": product.get('price', 0),
                     "category": product.get('category', ''),
                     "brand": product.get('brand', ''),
+                    "barcode": product.get('barcode', ''),
                     "description": product.get('description', ''),
                     "images": product.get('images', []),
                     "dimensions": {
@@ -2544,7 +2826,7 @@ class ExcelExportEngine:
     def _get_product_headers(self) -> List[str]:
         """Заголовки для товарной модели с учетом единиц измерения"""
         return [
-            "Артикул", "Наименование", "Бренд", "OE номер", "Категория", "Применимость",
+            "Артикул", "Наименование", "Бренд", "OE номер", "Категория", "Применимость", "Штрихкод",
             "Цена", "Себестоимость", 
             "Длина (исх.)", "Ширина (исх.)", "Высота (исх.)", "Ед. изм.",
             "Длина (мм)", "Ширина (мм)", "Высота (мм)",
@@ -2571,6 +2853,7 @@ class ExcelExportEngine:
             "OE номер": "oe_number",
             "Категория": "category",
             "Применимость": "compatibility",
+            "Штрихкод": "barcode",
             "Цена": "price",
             "Себестоимость": "cost",
             "Длина (исх.)": "length_orig",
@@ -2808,7 +3091,7 @@ class ExcelExportEngine:
             return []
 
 # --------------------------------------------
-# 🎨 ОСНОВНОЕ ПРИЛОЖЕНИЕ
+# 🎨 ОСНОВНОЕ ПРИЛОЖЕНИЕ (ПРОДОЛЖЕНИЕ)
 # --------------------------------------------
 class UnitEconomicsApp:
     """Главное приложение с конвертацией размеров"""
@@ -2830,11 +3113,16 @@ class UnitEconomicsApp:
         self.telegram = TelegramNotifier()
         self.google_sheets = GoogleSheetsExporter()
         self.dimension_unit = "мм"
+        self.existing_data = []
         
         if "theme" not in st.session_state:
             st.session_state.theme = "light"
         if "dimension_unit" not in st.session_state:
             st.session_state.dimension_unit = "мм"
+        if "results" not in st.session_state:
+            st.session_state.results = []
+        if "existing_data" not in st.session_state:
+            st.session_state.existing_data = []
     
     def run(self):
         """Запуск приложения"""
@@ -2877,6 +3165,9 @@ class UnitEconomicsApp:
                 <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
                     📤 Telegram
                 </span>
+                <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
+                    📋 Категории+ШК
+                </span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -2886,13 +3177,11 @@ class UnitEconomicsApp:
         with st.sidebar:
             st.markdown("## ⚙️ Настройки")
             
-            # Переключение темы
             theme = st.toggle("🌙 Темная тема", value=st.session_state.theme == "dark", key="theme_toggle")
             st.session_state.theme = "dark" if theme else "light"
             
             st.divider()
             
-            # Выбор единиц измерения
             st.markdown("### 📏 Единицы измерения")
             
             dimension_unit = st.radio(
@@ -3041,6 +3330,7 @@ class UnitEconomicsApp:
         """Основной контент с вкладками"""
         tabs = [
             "📁 Загрузка данных",
+            "📂 Готовый файл",
             "🗄️ База OE",
             "🔌 API интеграция",
             "🕷️ Парсинг конкурентов",
@@ -3048,39 +3338,42 @@ class UnitEconomicsApp:
             "🔄 1С/CRM",
             "📊 Дашборд"
         ]
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(tabs)
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(tabs)
         
         with tab1:
             self._render_upload_tab()
         
         with tab2:
-            self._render_oem_database_tab()
+            self._render_existing_file_tab()
         
         with tab3:
-            self._render_api_tab()
+            self._render_oem_database_tab()
         
         with tab4:
-            self._render_parsing_tab()
+            self._render_api_tab()
         
         with tab5:
-            self._render_autoupload_tab()
+            self._render_parsing_tab()
         
         with tab6:
-            self._render_integration_tab()
+            self._render_autoupload_tab()
         
         with tab7:
+            self._render_integration_tab()
+        
+        with tab8:
             self._render_dashboard_tab()
     
     def _render_upload_tab(self):
-        """Вкладка загрузки данных с выбором единиц"""
+        """Вкладка загрузки данных с новыми колонками"""
         st.subheader("📁 Загрузка данных для товарной модели")
         
         st.info(f"""
         **📦 Товарная модель (B2C)**
         
         **Загрузите 2 файла:**
-        1. **Основной** — Артикул, Бренд, Длина, Ширина, Высота, Количество, Цена
-        2. **Справочный** — Артикул, Бренд, Наименование, Применимость, OE номера
+        1. **Основной** — Артикул, Бренд, Длина, Ширина, Высота, **Вес**, Количество, Цена
+        2. **Справочный** — Артикул, Бренд, Наименование, Применимость, **Категории**, **Штрихкод**, OE номера
         
         **📏 Единицы измерения:** {self.dimension_unit}
         - Все размеры в файле будут интерпретироваться как {self.dimension_unit}
@@ -3091,19 +3384,21 @@ class UnitEconomicsApp:
         
         with col1:
             st.markdown("### 📦 Файл 1: Основной")
+            st.caption("Колонки: Артикул, Бренд, Длина, Ширина, Высота, **Вес**, Количество, Цена")
             main_file = st.file_uploader(
                 "Загрузите основной файл (Excel/CSV)",
                 type=["xlsx", "xls", "csv"],
-                help=f"Колонки: Артикул, Бренд, Длина ({self.dimension_unit}), Ширина ({self.dimension_unit}), Высота ({self.dimension_unit}), Количество, Цена",
+                help=f"Колонки: Артикул, Бренд, Длина ({self.dimension_unit}), Ширина ({self.dimension_unit}), Высота ({self.dimension_unit}), Вес (кг), Количество, Цена",
                 key="main_file_upload"
             )
         
         with col2:
             st.markdown("### 📋 Файл 2: Справочный")
+            st.caption("Колонки: Артикул, Бренд, Наименование, Применимость, **Категории**, **Штрихкод**, OE номера")
             ref_file = st.file_uploader(
                 "Загрузите справочный файл (Excel/CSV)",
                 type=["xlsx", "xls", "csv"],
-                help="Колонки: Артикул, Бренд, Наименование, Применимость, OE номера",
+                help="Колонки: Артикул, Бренд, Наименование, Применимость, Категории, Штрихкод, OE номера",
                 key="ref_file_upload"
             )
         
@@ -3111,9 +3406,9 @@ class UnitEconomicsApp:
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if st.button("🚀 Рассчитать (обычный)", type="primary", use_container_width=True, key="calc_normal"):
+                if st.button("🚀 Рассчитать (обычный)", type="primary", use_container_width=True, key="calc_normal_new"):
                     with st.spinner("⏳ Выполняется расчет..."):
-                        results = self._process_two_files(
+                        results = self._process_two_files_enhanced(
                             main_file,
                             ref_file,
                             self._get_marketplace_from_sidebar(),
@@ -3124,6 +3419,7 @@ class UnitEconomicsApp:
                         
                         if results:
                             self.results = results
+                            st.session_state.results = results
                             st.success(f"✅ Всего обработано {len(results)} позиций!")
                             self._show_results(results)
                             self._show_export(results)
@@ -3131,9 +3427,9 @@ class UnitEconomicsApp:
                             st.warning("⚠️ Нет данных для обработки")
             
             with col2:
-                if st.button("🚀 Рассчитать (параллельно)", type="primary", use_container_width=True, key="calc_parallel"):
+                if st.button("🚀 Рассчитать (параллельно)", type="primary", use_container_width=True, key="calc_parallel_new"):
                     with st.spinner("⏳ Выполняется параллельный расчет..."):
-                        results = self._process_two_files(
+                        results = self._process_two_files_enhanced(
                             main_file,
                             ref_file,
                             self._get_marketplace_from_sidebar(),
@@ -3144,6 +3440,7 @@ class UnitEconomicsApp:
                         
                         if results:
                             self.results = results
+                            st.session_state.results = results
                             st.success(f"✅ Всего обработано {len(results)} позиций!")
                             self._show_results(results)
                             self._show_export(results)
@@ -3151,7 +3448,7 @@ class UnitEconomicsApp:
                             st.warning("⚠️ Нет данных для обработки")
             
             with col3:
-                if st.button("📤 Отправить в Telegram", use_container_width=True, key="send_telegram"):
+                if st.button("📤 Отправить в Telegram", use_container_width=True, key="send_telegram_new"):
                     if self.results:
                         if self.telegram.send_report(self.results):
                             st.success("✅ Отчет отправлен в Telegram!")
@@ -3160,8 +3457,124 @@ class UnitEconomicsApp:
                     else:
                         st.warning("⚠️ Сначала рассчитайте юнит-экономику")
     
-    def _process_two_files(self, main_file, ref_file, marketplace: str, mode: str, days_storage: int, parallel: bool = False) -> List[Dict]:
-        """Обработка двух файлов: основной + справочный с учетом единиц измерения"""
+    def _render_existing_file_tab(self):
+        """Вкладка для загрузки готового файла и добавления новых данных"""
+        st.subheader("📂 Загрузка готового файла и добавление данных")
+        
+        st.info("""
+        **Загрузите готовый Excel-файл с юнит-экономикой:**
+        - Можно загрузить ранее созданный отчет
+        - Добавить новые данные поверх существующих
+        - Обновить цены или характеристики
+        - Сохранить объединенный результат
+        """)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            existing_file = st.file_uploader(
+                "📂 Загрузите готовый Excel-файл",
+                type=["xlsx", "xls"],
+                help="Загрузите ранее экспортированный файл юнит-экономики",
+                key="existing_file_upload"
+            )
+            
+            if existing_file:
+                if st.button("📖 Загрузить данные", use_container_width=True, key="load_existing"):
+                    with st.spinner("⏳ Загрузка данных..."):
+                        loaded = self.exporter.load_existing(existing_file.read())
+                        if loaded:
+                            self.existing_data = loaded
+                            st.session_state.existing_data = loaded
+                            st.success(f"✅ Загружено {len(loaded)} записей!")
+                            
+                            # Показываем превью
+                            df_preview = pd.DataFrame([{
+                                "Артикул": r.get("article", ""),
+                                "Наименование": r.get("name", "")[:30],
+                                "Бренд": r.get("brand", ""),
+                                "Категория": r.get("category", ""),
+                                "Цена": r.get("price", 0),
+                                "Прибыль": r.get("unit_profit", 0)
+                            } for r in loaded[:10]])
+                            st.dataframe(df_preview, use_container_width=True, hide_index=True)
+                            if len(loaded) > 10:
+                                st.caption(f"Показаны первые 10 из {len(loaded)}")
+                        else:
+                            st.error("❌ Ошибка загрузки файла")
+        
+        with col2:
+            st.markdown("### ➕ Добавление новых данных")
+            
+            st.caption("Загрузите новый файл для добавления к существующим данным")
+            
+            new_main_file = st.file_uploader(
+                "Новый основной файл (Excel/CSV)",
+                type=["xlsx", "xls", "csv"],
+                key="new_main_file"
+            )
+            
+            new_ref_file = st.file_uploader(
+                "Новый справочный файл (Excel/CSV)",
+                type=["xlsx", "xls", "csv"],
+                key="new_ref_file"
+            )
+            
+            if new_main_file and new_ref_file:
+                if st.button("🔄 Добавить новые данные", type="primary", use_container_width=True, key="add_new_data"):
+                    with st.spinner("⏳ Обработка новых данных..."):
+                        new_results = self._process_two_files_enhanced(
+                            new_main_file,
+                            new_ref_file,
+                            self._get_marketplace_from_sidebar(),
+                            self._get_mode_from_sidebar(),
+                            self._get_days_storage_from_sidebar(),
+                            parallel=False
+                        )
+                        
+                        if new_results:
+                            # Объединяем с существующими данными
+                            existing_articles = {r.get("article", "") for r in self.existing_data}
+                            added_count = 0
+                            updated_count = 0
+                            
+                            for new_row in new_results:
+                                article = new_row.get("article", "")
+                                if article in existing_articles:
+                                    # Обновляем существующую запись
+                                    for i, existing in enumerate(self.existing_data):
+                                        if existing.get("article") == article:
+                                            self.existing_data[i] = new_row
+                                            updated_count += 1
+                                            break
+                                else:
+                                    # Добавляем новую запись
+                                    self.existing_data.append(new_row)
+                                    added_count += 1
+                            
+                            st.success(f"✅ Добавлено {added_count} новых позиций, обновлено {updated_count} позиций")
+                            self.results = self.existing_data
+                            st.session_state.results = self.existing_data
+                            
+                            # Показываем превью обновленных данных
+                            df_preview = pd.DataFrame([{
+                                "Артикул": r.get("article", ""),
+                                "Наименование": r.get("name", "")[:30],
+                                "Бренд": r.get("brand", ""),
+                                "Категория": r.get("category", ""),
+                                "Цена": r.get("price", 0),
+                                "Прибыль": r.get("unit_profit", 0)
+                            } for r in self.existing_data[:20]])
+                            st.dataframe(df_preview, use_container_width=True, hide_index=True)
+                            if len(self.existing_data) > 20:
+                                st.caption(f"Показаны первые 20 из {len(self.existing_data)}")
+                            
+                            self._show_export(self.existing_data)
+                        else:
+                            st.warning("⚠️ Нет новых данных для добавления")
+    
+    def _process_two_files_enhanced(self, main_file, ref_file, marketplace: str, mode: str, days_storage: int, parallel: bool = False) -> List[Dict]:
+        """Обработка двух файлов с новыми колонками: Вес, Категории, Штрихкод"""
         try:
             if main_file.name.endswith('.csv'):
                 df_main = pd.read_csv(main_file, encoding='utf-8-sig')
@@ -3177,16 +3590,15 @@ class UnitEconomicsApp:
                 st.error("❌ Один из файлов пуст")
                 return []
             
-            main_cols = {col.lower(): col for col in df_main.columns}
-            
+            # Поиск колонок в основном файле
             article_col = None
             brand_col_main = None
             length_col = None
             width_col = None
             height_col = None
+            weight_col = None
             quantity_col = None
             price_col = None
-            weight_col = None
             
             for col in df_main.columns:
                 col_lower = col.lower()
@@ -3205,22 +3617,23 @@ class UnitEconomicsApp:
                 elif any(w in col_lower for w in ['высот', 'height']):
                     if not height_col:
                         height_col = col
+                elif any(w in col_lower for w in ['вес', 'weight', 'масса']):
+                    if not weight_col:
+                        weight_col = col
                 elif any(w in col_lower for w in ['количество', 'quantity', 'stock', 'остаток']):
                     if not quantity_col:
                         quantity_col = col
                 elif any(w in col_lower for w in ['цена', 'price']) and 'себест' not in col_lower:
                     if not price_col:
                         price_col = col
-                elif any(w in col_lower for w in ['вес', 'weight', 'масса']):
-                    if not weight_col:
-                        weight_col = col
             
-            ref_cols = {col.lower(): col for col in df_ref.columns}
-            
+            # Поиск колонок в справочном файле
             article_ref_col = None
             brand_ref_col = None
             name_col = None
             compatibility_col = None
+            category_col = None
+            barcode_col = None
             oe_col = None
             
             for col in df_ref.columns:
@@ -3237,6 +3650,12 @@ class UnitEconomicsApp:
                 elif any(w in col_lower for w in ['применимость', 'совместимость', 'compatibility', 'car']):
                     if not compatibility_col:
                         compatibility_col = col
+                elif any(w in col_lower for w in ['категори', 'category']):
+                    if not category_col:
+                        category_col = col
+                elif any(w in col_lower for w in ['штрих', 'barcode', 'ean', 'код']):
+                    if not barcode_col:
+                        barcode_col = col
                 elif any(w in col_lower for w in ['оем', 'oe', 'oem', 'номер', 'part number']):
                     if not oe_col:
                         oe_col = col
@@ -3253,6 +3672,7 @@ class UnitEconomicsApp:
                 st.warning("⚠️ В основном файле не найдена колонка с ценами")
                 return []
             
+            # Создаем справочник
             ref_dict = {}
             for idx, row in df_ref.iterrows():
                 article = safe_str(row[article_ref_col])
@@ -3261,6 +3681,8 @@ class UnitEconomicsApp:
                         "brand_ref": safe_str(row[brand_ref_col]) if brand_ref_col else "",
                         "name": safe_str(row[name_col]) if name_col else "",
                         "compatibility": safe_str(row[compatibility_col]) if compatibility_col else "",
+                        "category_ref": safe_str(row[category_col]) if category_col else "",
+                        "barcode": safe_str(row[barcode_col]) if barcode_col else "",
                         "oe_number": safe_str(row[oe_col]) if oe_col else ""
                     }
             
@@ -3285,7 +3707,7 @@ class UnitEconomicsApp:
                         futures = []
                         for chunk in chunks:
                             future = executor.submit(
-                                self._process_chunk,
+                                self._process_chunk_enhanced,
                                 chunk,
                                 ref_dict,
                                 marketplace,
@@ -3313,9 +3735,9 @@ class UnitEconomicsApp:
                         length = safe_float(row[length_col]) if length_col else 0
                         width = safe_float(row[width_col]) if width_col else 0
                         height = safe_float(row[height_col]) if height_col else 0
+                        weight = safe_float(row[weight_col]) if weight_col else 0
                         quantity = safe_int(row[quantity_col]) if quantity_col else 0
                         price = safe_float(row[price_col]) if price_col else 0
-                        weight = safe_float(row[weight_col]) if weight_col else 0
                         
                         if price <= 0:
                             continue
@@ -3325,8 +3747,11 @@ class UnitEconomicsApp:
                         brand = brand_main if brand_main else ref_data.get("brand_ref", "")
                         name = ref_data.get("name", "")
                         compatibility = ref_data.get("compatibility", "")
+                        category_ref = ref_data.get("category_ref", "")
+                        barcode = ref_data.get("barcode", "")
                         oe_number = ref_data.get("oe_number", "")
                         
+                        # Поиск в базе OE
                         oe_data = self.engine.oem_db.get_by_oe(oe_number) if oe_number else None
                         
                         if oe_data:
@@ -3342,12 +3767,28 @@ class UnitEconomicsApp:
                             if weight == 0:
                                 weight = oe_data.get("weight", 0)
                             
-                            category = oe_data.get("category", "Прочее")
-                        else:
-                            category, confidence = self.classifier.classify(name) if name else ("Прочее", 0)
+                            if not category_ref:
+                                category_ref = oe_data.get("category", "")
+                            
+                            if not barcode:
+                                barcode = oe_data.get("barcode", "")
+                        
+                        # Определяем категорию
+                        category = category_ref
+                        if not category or category == "" or category == "Прочее":
+                            if name:
+                                category, confidence = self.classifier.classify(name)
+                            else:
+                                category = "Прочее"
                         
                         if not name:
                             name = f"{brand} {oe_number}" if brand and oe_number else article
+                        
+                        # Извлекаем штрихкод если не найден
+                        if not barcode and name:
+                            extracted_barcode = self.classifier.extract_barcode(name)
+                            if extracted_barcode:
+                                barcode = extracted_barcode
                         
                         cost = price * 0.5
                         
@@ -3365,6 +3806,7 @@ class UnitEconomicsApp:
                             "weight": weight,
                             "quantity": quantity,
                             "compatibility": compatibility,
+                            "barcode": barcode,
                             "source": "from_oem_db" if oe_data else "from_file"
                         }
                         
@@ -3373,6 +3815,7 @@ class UnitEconomicsApp:
                             result["source"] = "from_oem_db" if oe_data else "from_file"
                             result["quantity"] = quantity
                             result["compatibility"] = compatibility
+                            result["barcode"] = barcode
                             results.append(result)
                             
                     except Exception as e:
@@ -3396,10 +3839,11 @@ class UnitEconomicsApp:
             st.error(f"❌ Ошибка обработки данных: {str(e)}")
             return []
     
-    def _process_chunk(self, chunk, ref_dict, marketplace, mode, days_storage, dimension_unit):
-        """Обработка чанка данных"""
+    def _process_chunk_enhanced(self, chunk, ref_dict, marketplace, mode, days_storage, dimension_unit):
+        """Обработка чанка данных с новыми колонками"""
         results = []
         engine = UnitEconomicsEngine(marketplace, mode, days_storage, dimension_unit)
+        classifier = CategoryClassifier()
         
         for idx, row in chunk.iterrows():
             try:
@@ -3408,9 +3852,9 @@ class UnitEconomicsApp:
                 length = safe_float(row.get('Длина', row.get('length', 0)))
                 width = safe_float(row.get('Ширина', row.get('width', 0)))
                 height = safe_float(row.get('Высота', row.get('height', 0)))
+                weight = safe_float(row.get('Вес', row.get('weight', 0)))
                 quantity = safe_int(row.get('Количество', row.get('quantity', 0)))
                 price = safe_float(row.get('Цена', row.get('price', 0)))
-                weight = safe_float(row.get('Вес', row.get('weight', 0)))
                 
                 if price <= 0:
                     continue
@@ -3420,6 +3864,8 @@ class UnitEconomicsApp:
                 brand = brand if brand else ref_data.get("brand_ref", "")
                 name = ref_data.get("name", "")
                 compatibility = ref_data.get("compatibility", "")
+                category_ref = ref_data.get("category_ref", "")
+                barcode = ref_data.get("barcode", "")
                 oe_number = ref_data.get("oe_number", "")
                 
                 oe_data = engine.oem_db.get_by_oe(oe_number) if oe_number else None
@@ -3437,12 +3883,26 @@ class UnitEconomicsApp:
                     if weight == 0:
                         weight = oe_data.get("weight", 0)
                     
-                    category = oe_data.get("category", "Прочее")
-                else:
-                    category = "Прочее"
+                    if not category_ref:
+                        category_ref = oe_data.get("category", "")
+                    
+                    if not barcode:
+                        barcode = oe_data.get("barcode", "")
+                
+                category = category_ref
+                if not category or category == "" or category == "Прочее":
+                    if name:
+                        category, confidence = classifier.classify(name)
+                    else:
+                        category = "Прочее"
                 
                 if not name:
                     name = f"{brand} {oe_number}" if brand and oe_number else article
+                
+                if not barcode and name:
+                    extracted_barcode = classifier.extract_barcode(name)
+                    if extracted_barcode:
+                        barcode = extracted_barcode
                 
                 cost = price * 0.5
                 
@@ -3459,13 +3919,15 @@ class UnitEconomicsApp:
                     "height": height,
                     "weight": weight,
                     "quantity": quantity,
-                    "compatibility": compatibility
+                    "compatibility": compatibility,
+                    "barcode": barcode
                 }
                 
                 result = engine.calculate_product(row_data)
                 if result:
                     result["quantity"] = quantity
                     result["compatibility"] = compatibility
+                    result["barcode"] = barcode
                     results.append(result)
                     
             except Exception as e:
@@ -3485,6 +3947,7 @@ class UnitEconomicsApp:
         - ✅ Поиск по OE, бренду, категории
         - ✅ Импорт/экспорт базы
         - ✅ Статистика базы
+        - ✅ Добавление штрихкодов
         """)
         
         tabs = st.tabs(["📋 Просмотр", "➕ Добавить", "🔍 Поиск", "📊 Статистика"])
@@ -3507,6 +3970,7 @@ class UnitEconomicsApp:
                         "Категория": data.get("category", ""),
                         "Бренд": data.get("brand", ""),
                         "Вес (кг)": data.get("weight", 0),
+                        "Штрихкод": data.get("barcode", ""),
                         "Совместимость": ", ".join(data.get("compatibility", [])[:2]),
                         "Кросс-ссылки": ", ".join(data.get("cross_reference", [])[:2])
                     })
@@ -3530,6 +3994,7 @@ class UnitEconomicsApp:
                 new_category = st.text_input("Категория *", placeholder="Фильтры", key="new_category")
                 new_subcategory = st.text_input("Подкатегория", placeholder="Масляные фильтры", key="new_subcategory")
                 new_weight = st.number_input("Вес (кг)", min_value=0.0, step=0.1, value=0.0, key="new_weight")
+                new_barcode = st.text_input("Штрихкод", placeholder="1234567890123", key="new_barcode")
             
             with col2:
                 new_length = st.number_input("Длина (мм)", min_value=0, step=10, value=0, key="new_length")
@@ -3551,6 +4016,9 @@ class UnitEconomicsApp:
                             "height": new_height
                         }
                     }
+                    
+                    if new_barcode and is_valid_barcode(new_barcode):
+                        data["barcode"] = re.sub(r'[^\d]', '', new_barcode)
                     
                     if new_compatibility:
                         data["compatibility"] = [x.strip() for x in new_compatibility.split(",") if x.strip()]
@@ -3727,6 +4195,9 @@ class UnitEconomicsApp:
         - Автоматический сбор цен с Яндекс Маркета, Ozon, Wildberries
         - Анализ конкурентной среды
         - Рекомендации по ценообразованию
+        
+        **⚠️ Важно:** При парсинге могут использоваться демо-данные, 
+        если маркетплейсы блокируют запросы.
         """)
         
         col1, col2 = st.columns(2)
@@ -3760,20 +4231,25 @@ class UnitEconomicsApp:
                             results = {marketplace: parser_map[marketplace](search_query)}
                         
                         if results:
-                            st.success("✅ Парсинг завершен!")
-                            
                             total_items = sum(len(items) for items in results.values())
-                            st.metric("📦 Найдено товаров", total_items)
+                            st.success(f"✅ Парсинг завершен! Найдено {total_items} товаров")
+                            
+                            for mp, items in results.items():
+                                demo_count = sum(1 for i in items if i.get('is_demo', False))
+                                status = "📊" if not demo_count else "🧪 (демо)"
+                                st.metric(f"{mp} {status}", len(items))
                             
                             for mp, items in results.items():
                                 if items:
                                     with st.expander(f"📊 {mp} — {len(items)} товаров"):
-                                        df = pd.DataFrame(items[:20])
+                                        df = pd.DataFrame(items)
+                                        if 'is_demo' in df.columns:
+                                            df = df.drop(columns=['is_demo'])
                                         if 'price' in df.columns:
-                                            df['price'] = df['price'].apply(format_currency)
+                                            df['price'] = df['price'].apply(lambda x: format_currency(x) if x else '0 ₽')
+                                        if 'parsed_at' in df.columns:
+                                            df['parsed_at'] = df['parsed_at'].apply(lambda x: x[:16] if x else '')
                                         st.dataframe(df, use_container_width=True, hide_index=True)
-                                        if len(items) > 20:
-                                            st.caption(f"Показаны первые 20 из {len(items)}")
                         else:
                             st.warning("⚠️ Не найдено товаров по запросу")
                 else:
@@ -3795,8 +4271,8 @@ class UnitEconomicsApp:
                                 analysis = competitor_manager.analyze_competitor_prices(name, price)
                                 analysis_results.append({
                                     'Товар': name[:30],
-                                    'Наша цена': price,
-                                    'Ср. цена конкурентов': analysis.get('avg_price', 0),
+                                    'Наша цена': format_currency(price),
+                                    'Ср. цена конкурентов': format_currency(analysis.get('avg_price', 0)),
                                     'Позиция': analysis.get('price_position', ''),
                                     'Рекомендация': analysis.get('recommendation', '')
                                 })
@@ -3853,6 +4329,7 @@ class UnitEconomicsApp:
                                 "name": product.get("name", ""),
                                 "category": product.get("category", ""),
                                 "brand": product.get("brand", ""),
+                                "barcode": product.get("barcode", ""),
                                 "length_mm": product.get("length_mm", 0),
                                 "width_mm": product.get("width_mm", 0),
                                 "height_mm": product.get("height_mm", 0)
@@ -4271,9 +4748,11 @@ class UnitEconomicsApp:
                 "Бренд": r.get("brand", ""),
                 "OE номер": r.get("oe_number", ""),
                 "Категория": r.get("category", ""),
+                "Штрихкод": r.get("barcode", ""),
                 "Цена": format_currency(r.get("price", 0)),
                 "Прибыль": format_currency(r.get("unit_profit", 0)),
                 "Маржа": format_percent(r.get("margin", 0)),
+                "Вес (кг)": r.get("weight", 0),
                 "ABC": r.get("abc_category", ""),
                 "Позиция цены": r.get("price_position", ""),
                 "Размеры": f"{r.get('length_orig', 0)}x{r.get('width_orig', 0)}x{r.get('height_orig', 0)} {r.get('dimension_unit', 'мм')}"
@@ -4340,7 +4819,9 @@ class UnitEconomicsApp:
                     "Бренд": r.get("brand", ""),
                     "OE номер": r.get("oe_number", ""),
                     "Категория": r.get("category", ""),
+                    "Штрихкод": r.get("barcode", ""),
                     "Цена": r.get("price", 0),
+                    "Вес (кг)": r.get("weight", 0),
                     "Прибыль": r.get("unit_profit", 0),
                     "Маржа %": r.get("margin", 0),
                     "Позиция цены": r.get("price_position", ""),
