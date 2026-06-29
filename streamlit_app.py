@@ -1,16 +1,12 @@
 """
 ================================================================================
-🚀 ULTIMATE UNIT ECONOMICS ENGINE v48.0 - КОНВЕРТАЦИЯ РАЗМЕРОВ
+🚀 ULTIMATE UNIT ECONOMICS ENGINE v48.1 - ИСПРАВЛЕНИЕ ОШИБОК
 ================================================================================
-📌 ВЕРСИЯ: 48.0.0
-📌 НОВЫЕ ФУНКЦИИ:
-    ✅ Конвертация длины, ширины, высоты (мм ↔ см)
-    ✅ Выбор единиц измерения при загрузке
-    ✅ Автоматическое определение единиц по значениям
-    ✅ Сохранение выбранных единиц в настройках
-
-🚀 ЗАПУСК:
-    streamlit run ultimate_unit_economy.py
+📌 ВЕРСИЯ: 48.1.0
+📌 ИСПРАВЛЕНИЯ:
+    ✅ Исправлены дублирующиеся ID в selectbox
+    ✅ Обновлен use_container_width на width
+    ✅ Добавлены уникальные ключи для всех элементов
 ================================================================================
 """
 
@@ -93,7 +89,7 @@ except ImportError:
 # КОНФИГУРАЦИЯ
 # --------------------------------------------
 CONFIG = {
-    "version": "48.0.0",
+    "version": "48.1.0",
     "app_name": "🚀 Юнит-экономика с конвертацией размеров",
     "currency": "₽",
     "marketplaces": ["Яндекс Маркет", "Ozon", "Wildberries", "AliExpress", "Мегамаркет"],
@@ -2886,12 +2882,12 @@ class UnitEconomicsApp:
         """, unsafe_allow_html=True)
     
     def _render_sidebar(self):
-        """Отображение боковой панели"""
+        """Отображение боковой панели с уникальными ключами"""
         with st.sidebar:
             st.markdown("## ⚙️ Настройки")
             
             # Переключение темы
-            theme = st.toggle("🌙 Темная тема", value=st.session_state.theme == "dark")
+            theme = st.toggle("🌙 Темная тема", value=st.session_state.theme == "dark", key="theme_toggle")
             st.session_state.theme = "dark" if theme else "light"
             
             st.divider()
@@ -2903,7 +2899,8 @@ class UnitEconomicsApp:
                 "Выберите единицы для размеров",
                 options=["мм", "см"],
                 index=0 if st.session_state.dimension_unit == "мм" else 1,
-                help="Выберите в каких единицах указаны размеры в вашем файле"
+                help="Выберите в каких единицах указаны размеры в вашем файле",
+                key="dimension_unit_radio"
             )
             st.session_state.dimension_unit = dimension_unit
             self.dimension_unit = dimension_unit
@@ -2915,32 +2912,37 @@ class UnitEconomicsApp:
             ym_api_key = st.text_input(
                 "Яндекс Маркет API ключ",
                 type="password",
-                placeholder="Ваш API ключ"
+                placeholder="Ваш API ключ",
+                key="ym_api_key"
             )
             
             ozon_api_key = st.text_input(
                 "Ozon API ключ",
                 type="password",
-                placeholder="Ваш API ключ"
+                placeholder="Ваш API ключ",
+                key="ozon_api_key"
             )
             
             ozon_client_id = st.text_input(
                 "Ozon Client ID",
                 type="password",
-                placeholder="Ваш Client ID"
+                placeholder="Ваш Client ID",
+                key="ozon_client_id"
             )
             
             wb_api_key = st.text_input(
                 "Wildberries API ключ",
                 type="password",
-                placeholder="Ваш API ключ"
+                placeholder="Ваш API ключ",
+                key="wb_api_key"
             )
             
             ds_api_key = st.text_input(
                 "🔑 DeepSeek API ключ",
                 type="password",
                 placeholder="sk-...",
-                help="Для AI-тарифов"
+                help="Для AI-тарифов",
+                key="ds_api_key"
             )
             if ds_api_key:
                 self.tariff_provider.api_key = ds_api_key
@@ -2953,11 +2955,13 @@ class UnitEconomicsApp:
             tg_token = st.text_input(
                 "Telegram Bot Token",
                 type="password",
-                placeholder="123456789:ABCdef..."
+                placeholder="123456789:ABCdef...",
+                key="tg_token"
             )
             tg_chat_id = st.text_input(
                 "Telegram Chat ID",
-                placeholder="123456789"
+                placeholder="123456789",
+                key="tg_chat_id"
             )
             if tg_token and tg_chat_id:
                 self.telegram = TelegramNotifier(tg_token, tg_chat_id)
@@ -2970,11 +2974,13 @@ class UnitEconomicsApp:
             gs_json = st.text_area(
                 "Google Service Account JSON",
                 placeholder='{"type": "service_account", ...}',
-                height=100
+                height=100,
+                key="gs_json"
             )
             gs_name = st.text_input(
                 "Название таблицы",
-                placeholder="Юнит-экономика"
+                placeholder="Юнит-экономика",
+                key="gs_name"
             )
             if gs_json and gs_name:
                 self.google_sheets = GoogleSheetsExporter(gs_json, gs_name)
@@ -2987,34 +2993,37 @@ class UnitEconomicsApp:
             marketplace = st.selectbox(
                 "🏪 Маркетплейс",
                 CONFIG["marketplaces"],
-                index=0
+                index=0,
+                key="marketplace_select"
             )
             
             mode = st.selectbox(
                 "📦 Режим работы",
                 CONFIG["operation_modes"],
-                index=0
+                index=0,
+                key="mode_select"
             )
             
             days_storage = st.number_input(
                 "📦 Хранение (дней)",
                 min_value=1,
                 max_value=730,
-                value=30
+                value=30,
+                key="days_storage"
             )
             
             st.divider()
             
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("🔄 Обновить тарифы", use_container_width=True):
+                if st.button("🔄 Обновить тарифы", use_container_width=True, key="refresh_rates"):
                     with st.spinner("⏳ Получение тарифов..."):
                         self.tariff_provider.clear_cache()
                         self.all_rates = self.tariff_provider.get_all_rates()
                         st.success("✅ Тарифы обновлены!")
             
             with col2:
-                if st.button("🗑️ Очистить кэш", use_container_width=True):
+                if st.button("🗑️ Очистить кэш", use_container_width=True, key="clear_cache"):
                     APICache().clear()
                     st.success("✅ Кэш очищен!")
             
@@ -3086,7 +3095,7 @@ class UnitEconomicsApp:
                 "Загрузите основной файл (Excel/CSV)",
                 type=["xlsx", "xls", "csv"],
                 help=f"Колонки: Артикул, Бренд, Длина ({self.dimension_unit}), Ширина ({self.dimension_unit}), Высота ({self.dimension_unit}), Количество, Цена",
-                key="main_data"
+                key="main_file_upload"
             )
         
         with col2:
@@ -3095,14 +3104,14 @@ class UnitEconomicsApp:
                 "Загрузите справочный файл (Excel/CSV)",
                 type=["xlsx", "xls", "csv"],
                 help="Колонки: Артикул, Бренд, Наименование, Применимость, OE номера",
-                key="ref_data"
+                key="ref_file_upload"
             )
         
         if main_file and ref_file:
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if st.button("🚀 Рассчитать (обычный)", type="primary", use_container_width=True):
+                if st.button("🚀 Рассчитать (обычный)", type="primary", use_container_width=True, key="calc_normal"):
                     with st.spinner("⏳ Выполняется расчет..."):
                         results = self._process_two_files(
                             main_file,
@@ -3122,7 +3131,7 @@ class UnitEconomicsApp:
                             st.warning("⚠️ Нет данных для обработки")
             
             with col2:
-                if st.button("🚀 Рассчитать (параллельно)", type="primary", use_container_width=True):
+                if st.button("🚀 Рассчитать (параллельно)", type="primary", use_container_width=True, key="calc_parallel"):
                     with st.spinner("⏳ Выполняется параллельный расчет..."):
                         results = self._process_two_files(
                             main_file,
@@ -3142,7 +3151,7 @@ class UnitEconomicsApp:
                             st.warning("⚠️ Нет данных для обработки")
             
             with col3:
-                if st.button("📤 Отправить в Telegram", use_container_width=True):
+                if st.button("📤 Отправить в Telegram", use_container_width=True, key="send_telegram"):
                     if self.results:
                         if self.telegram.send_report(self.results):
                             st.success("✅ Отчет отправлен в Telegram!")
@@ -3483,7 +3492,7 @@ class UnitEconomicsApp:
         with tabs[0]:
             st.markdown("### 📋 Все OE номера")
             
-            search = st.text_input("🔍 Фильтр по OE номеру", placeholder="Введите OE номер...")
+            search = st.text_input("🔍 Фильтр по OE номеру", placeholder="Введите OE номер...", key="oem_search")
             
             all_oe = list(self.oem_db.data.items())
             
@@ -3516,20 +3525,20 @@ class UnitEconomicsApp:
             col1, col2 = st.columns(2)
             
             with col1:
-                new_oe = st.text_input("OE номер *", placeholder="Например: 0986AF0059")
-                new_brand = st.text_input("Бренд *", placeholder="BOSCH")
-                new_category = st.text_input("Категория *", placeholder="Фильтры")
-                new_subcategory = st.text_input("Подкатегория", placeholder="Масляные фильтры")
-                new_weight = st.number_input("Вес (кг)", min_value=0.0, step=0.1, value=0.0)
+                new_oe = st.text_input("OE номер *", placeholder="Например: 0986AF0059", key="new_oe")
+                new_brand = st.text_input("Бренд *", placeholder="BOSCH", key="new_brand")
+                new_category = st.text_input("Категория *", placeholder="Фильтры", key="new_category")
+                new_subcategory = st.text_input("Подкатегория", placeholder="Масляные фильтры", key="new_subcategory")
+                new_weight = st.number_input("Вес (кг)", min_value=0.0, step=0.1, value=0.0, key="new_weight")
             
             with col2:
-                new_length = st.number_input("Длина (мм)", min_value=0, step=10, value=0)
-                new_width = st.number_input("Ширина (мм)", min_value=0, step=10, value=0)
-                new_height = st.number_input("Высота (мм)", min_value=0, step=10, value=0)
-                new_compatibility = st.text_area("Совместимость (через запятую)", placeholder="BMW 3, Audi A4, VW Golf")
-                new_cross = st.text_area("Кросс-ссылки (через запятую)", placeholder="MANN W842/2, MAHLE OC 205")
+                new_length = st.number_input("Длина (мм)", min_value=0, step=10, value=0, key="new_length")
+                new_width = st.number_input("Ширина (мм)", min_value=0, step=10, value=0, key="new_width")
+                new_height = st.number_input("Высота (мм)", min_value=0, step=10, value=0, key="new_height")
+                new_compatibility = st.text_area("Совместимость (через запятую)", placeholder="BMW 3, Audi A4, VW Golf", key="new_compatibility")
+                new_cross = st.text_area("Кросс-ссылки (через запятую)", placeholder="MANN W842/2, MAHLE OC 205", key="new_cross")
             
-            if st.button("💾 Сохранить OE номер", type="primary"):
+            if st.button("💾 Сохранить OE номер", type="primary", key="save_oe"):
                 if new_oe and new_brand and new_category:
                     data = {
                         "category": new_category,
@@ -3559,12 +3568,13 @@ class UnitEconomicsApp:
             
             search_type = st.selectbox(
                 "Тип поиска",
-                ["По OE номеру", "По бренду", "По категории"]
+                ["По OE номеру", "По бренду", "По категории"],
+                key="search_type"
             )
             
-            search_query = st.text_input("Поисковый запрос")
+            search_query = st.text_input("Поисковый запрос", key="search_query")
             
-            if search_query and st.button("🔍 Найти"):
+            if search_query and st.button("🔍 Найти", key="search_btn"):
                 if search_type == "По OE номеру":
                     result = self.oem_db.get_by_oe(search_query)
                     if result:
@@ -3625,14 +3635,15 @@ class UnitEconomicsApp:
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("📤 Экспорт базы в JSON", use_container_width=True):
+                if st.button("📤 Экспорт базы в JSON", use_container_width=True, key="export_oem"):
                     json_data = json.dumps(self.oem_db.data, ensure_ascii=False, indent=2)
                     st.download_button(
                         "📥 Скачать JSON",
                         data=json_data,
                         file_name=f"oem_database_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
                         mime="application/json",
-                        use_container_width=True
+                        use_container_width=True,
+                        key="download_oem"
                     )
             
             with col2:
@@ -3669,15 +3680,17 @@ class UnitEconomicsApp:
             
             api_action = st.selectbox(
                 "Действие",
-                ["Получить товары", "Получить цены", "Получить остатки", "Обновить цены"]
+                ["Получить товары", "Получить цены", "Получить остатки", "Обновить цены"],
+                key="api_action"
             )
             
             marketplace = st.selectbox(
                 "Маркетплейс",
-                ["Яндекс Маркет", "Ozon", "Wildberries"]
+                ["Яндекс Маркет", "Ozon", "Wildberries"],
+                key="api_marketplace"
             )
             
-            if st.button("🚀 Выполнить запрос", type="primary", use_container_width=True):
+            if st.button("🚀 Выполнить запрос", type="primary", use_container_width=True, key="execute_api"):
                 with st.spinner("⏳ Выполняется запрос..."):
                     result = self._execute_api_request(marketplace, api_action)
                     if result:
@@ -3699,10 +3712,10 @@ class UnitEconomicsApp:
             update_file = st.file_uploader(
                 "Файл с ценами (Excel/CSV)",
                 type=["xlsx", "xls", "csv"],
-                key="update_prices"
+                key="update_prices_file"
             )
             
-            if update_file and st.button("🔄 Обновить цены", use_container_width=True):
+            if update_file and st.button("🔄 Обновить цены", use_container_width=True, key="update_prices_btn"):
                 st.warning("⚠️ Функция в разработке. Требуется настройка API ключей.")
     
     def _render_parsing_tab(self):
@@ -3721,15 +3734,17 @@ class UnitEconomicsApp:
         with col1:
             search_query = st.text_input(
                 "🔍 Поисковый запрос",
-                placeholder="Например: масло моторное 5W-40"
+                placeholder="Например: масло моторное 5W-40",
+                key="parse_search"
             )
             
             marketplace = st.selectbox(
                 "Маркетплейс",
-                ["Все", "Яндекс Маркет", "Ozon", "Wildberries"]
+                ["Все", "Яндекс Маркет", "Ozon", "Wildberries"],
+                key="parse_marketplace"
             )
             
-            if st.button("🕷️ Начать парсинг", type="primary", use_container_width=True):
+            if st.button("🕷️ Начать парсинг", type="primary", use_container_width=True, key="start_parse"):
                 if search_query:
                     with st.spinner(f"⏳ Парсинг {marketplace if marketplace != 'Все' else 'всех маркетплейсов'}..."):
                         parser = CompetitorParser()
@@ -3767,7 +3782,7 @@ class UnitEconomicsApp:
         with col2:
             st.markdown("### 📊 Анализ конкурентов")
             
-            if st.button("📊 Анализировать мои товары", use_container_width=True):
+            if st.button("📊 Анализировать мои товары", use_container_width=True, key="analyze_competitors"):
                 if self.results:
                     with st.spinner("⏳ Анализ конкурентов..."):
                         competitor_manager = CompetitorManager()
@@ -3815,15 +3830,17 @@ class UnitEconomicsApp:
             
             upload_type = st.selectbox(
                 "Тип выгрузки",
-                ["Цены", "Остатки", "Карточки товаров"]
+                ["Цены", "Остатки", "Карточки товаров"],
+                key="upload_type"
             )
             
             marketplace = st.selectbox(
                 "Маркетплейс",
-                ["Яндекс Маркет", "Ozon", "Wildberries"]
+                ["Яндекс Маркет", "Ozon", "Wildberries"],
+                key="upload_marketplace"
             )
             
-            if st.button("🚀 Запустить выгрузку", type="primary", use_container_width=True):
+            if st.button("🚀 Запустить выгрузку", type="primary", use_container_width=True, key="start_upload"):
                 if self.results:
                     with st.spinner(f"⏳ Выгрузка {upload_type} на {marketplace}..."):
                         products = []
@@ -3865,32 +3882,35 @@ class UnitEconomicsApp:
         with col2:
             st.markdown("### ⏰ Расписание выгрузок")
             
-            enable_schedule = st.checkbox("Включить автоматические выгрузки", value=False)
+            enable_schedule = st.checkbox("Включить автоматические выгрузки", value=False, key="enable_schedule")
             
             if enable_schedule:
                 schedule_type = st.selectbox(
                     "Тип расписания",
-                    ["Интервал", "По расписанию"]
+                    ["Интервал", "По расписанию"],
+                    key="schedule_type"
                 )
                 
                 if schedule_type == "Интервал":
                     interval = st.selectbox(
                         "Интервал",
-                        ["Каждый час", "Каждые 3 часа", "Каждые 6 часов", "Каждый день"]
+                        ["Каждый час", "Каждые 3 часа", "Каждые 6 часов", "Каждый день"],
+                        key="interval_select"
                     )
                     interval_seconds = {"Каждый час": 3600, "Каждые 3 часа": 10800, "Каждые 6 часов": 21600, "Каждый день": 86400}
                     
                 else:
-                    hour = st.selectbox("Час", range(0, 24), index=9)
-                    minute = st.selectbox("Минута", range(0, 60), index=0)
+                    hour = st.selectbox("Час", range(0, 24), index=9, key="schedule_hour")
+                    minute = st.selectbox("Минута", range(0, 60), index=0, key="schedule_minute")
                 
                 upload_tasks = st.multiselect(
                     "Задачи для автоматической выгрузки",
                     ["Выгрузка цен", "Выгрузка остатков", "Синхронизация с 1С", "Отправка отчета в CRM"],
-                    default=["Выгрузка цен"]
+                    default=["Выгрузка цен"],
+                    key="upload_tasks"
                 )
                 
-                if st.button("✅ Сохранить расписание", use_container_width=True):
+                if st.button("✅ Сохранить расписание", use_container_width=True, key="save_schedule"):
                     schedule_data = {
                         "type": "interval" if schedule_type == "Интервал" else "cron",
                         "task_type": "upload_prices",
@@ -3918,7 +3938,7 @@ class UnitEconomicsApp:
                         st.metric("Ошибок", entry.get('failed', 0))
                         if entry.get('errors'):
                             st.warning(f"⚠️ {len(entry.get('errors', []))} ошибок")
-                if st.button("🗑️ Очистить лог"):
+                if st.button("🗑️ Очистить лог", key="clear_log"):
                     self.uploader.clear_log()
                     st.success("Лог очищен")
             else:
@@ -3945,12 +3965,13 @@ class UnitEconomicsApp:
             with col1:
                 onec_url = st.text_input(
                     "URL 1С Web-сервиса",
-                    placeholder="https://1c-server.ru/api"
+                    placeholder="https://1c-server.ru/api",
+                    key="onec_url"
                 )
-                onec_login = st.text_input("Логин 1С")
-                onec_password = st.text_input("Пароль 1С", type="password")
+                onec_login = st.text_input("Логин 1С", key="onec_login")
+                onec_password = st.text_input("Пароль 1С", type="password", key="onec_password")
                 
-                if st.button("🔗 Подключить 1С", use_container_width=True):
+                if st.button("🔗 Подключить 1С", use_container_width=True, key="connect_1c"):
                     if onec_url:
                         self.onec = OneCIntegration(onec_url, onec_login, onec_password)
                         st.success("✅ 1С подключена!")
@@ -3962,10 +3983,11 @@ class UnitEconomicsApp:
                 
                 action = st.selectbox(
                     "Действие",
-                    ["Экспорт товаров в 1С", "Импорт товаров из 1С", "Синхронизация цен", "Синхронизация остатков"]
+                    ["Экспорт товаров в 1С", "Импорт товаров из 1С", "Синхронизация цен", "Синхронизация остатков"],
+                    key="onec_action"
                 )
                 
-                if st.button("🚀 Выполнить", use_container_width=True):
+                if st.button("🚀 Выполнить", use_container_width=True, key="execute_1c"):
                     if action == "Экспорт товаров в 1С":
                         if self.results:
                             result = self.onec.export_to_1c(self.results[:100], "products")
@@ -3991,16 +4013,18 @@ class UnitEconomicsApp:
             with col1:
                 crm_type = st.selectbox(
                     "Тип CRM",
-                    ["AmoCRM", "Bitrix24", "HubSpot", "Другая"]
+                    ["AmoCRM", "Bitrix24", "HubSpot", "Другая"],
+                    key="crm_type"
                 )
                 
                 crm_url = st.text_input(
                     "URL CRM API",
-                    placeholder="https://your-crm.com/api"
+                    placeholder="https://your-crm.com/api",
+                    key="crm_url"
                 )
-                crm_token = st.text_input("API ключ/Token", type="password")
+                crm_token = st.text_input("API ключ/Token", type="password", key="crm_token")
                 
-                if st.button("🔗 Подключить CRM", use_container_width=True):
+                if st.button("🔗 Подключить CRM", use_container_width=True, key="connect_crm"):
                     if crm_url and crm_token:
                         self.crm = CRMIntegration(
                             crm_type.lower().replace(" ", ""),
@@ -4014,7 +4038,7 @@ class UnitEconomicsApp:
             with col2:
                 st.markdown("### 📤 Отправка отчета")
                 
-                if st.button("📊 Отправить отчет в CRM", type="primary", use_container_width=True):
+                if st.button("📊 Отправить отчет в CRM", type="primary", use_container_width=True, key="send_crm_report"):
                     if self.results:
                         total_profit = sum(r.get("unit_profit", 0) for r in self.results)
                         profitable = sum(1 for r in self.results if r.get("unit_profit", 0) > 0)
@@ -4054,7 +4078,7 @@ class UnitEconomicsApp:
         
         if df.empty:
             st.info("💡 Нет данных для отображения. Добавьте продажи или сгенерируйте демо-данные.")
-            if st.button("🔄 Сгенерировать демо-данные"):
+            if st.button("🔄 Сгенерировать демо-данные", key="gen_demo"):
                 self._generate_demo_sales()
                 st.rerun()
             return
@@ -4065,11 +4089,11 @@ class UnitEconomicsApp:
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("📈 Показать тренд продаж", use_container_width=True):
+                if st.button("📈 Показать тренд продаж", use_container_width=True, key="show_trend"):
                     self._render_sales_trend(df)
             
             with col2:
-                if st.button("📊 Показать категории", use_container_width=True):
+                if st.button("📊 Показать категории", use_container_width=True, key="show_categories"):
                     self._render_category_chart(df)
     
     def _render_fast_metrics(self, df: pd.DataFrame):
@@ -4271,7 +4295,7 @@ class UnitEconomicsApp:
             marketplace = self._get_marketplace_from_sidebar()
             mode = self._get_mode_from_sidebar()
             
-            if st.button("📥 Скачать Excel-отчет", type="primary", use_container_width=True):
+            if st.button("📥 Скачать Excel-отчет", type="primary", use_container_width=True, key="download_excel"):
                 with st.spinner("⏳ Генерация Excel-файла..."):
                     try:
                         if not self.all_rates:
@@ -4285,7 +4309,8 @@ class UnitEconomicsApp:
                                 data=data,
                                 file_name=f"юнит_экономика_{marketplace}_{mode}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
+                                use_container_width=True,
+                                key="download_file"
                             )
                             st.success("✅ Отчет готов к скачиванию!")
                         else:
@@ -4295,7 +4320,7 @@ class UnitEconomicsApp:
                         logger.error(f"Export error: {e}")
         
         with col3:
-            if st.button("📤 Экспорт в Google Sheets", use_container_width=True):
+            if st.button("📤 Экспорт в Google Sheets", use_container_width=True, key="export_gsheets"):
                 if self.results:
                     with st.spinner("⏳ Экспорт в Google Sheets..."):
                         result = self.google_sheets.export_results(self.results)
