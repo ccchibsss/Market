@@ -1,16 +1,14 @@
 """
 ================================================================================
-🚀 ULTIMATE UNIT ECONOMICS ENGINE v49.0 - ПОЛНАЯ ВЕРСИЯ
+🚀 ULTIMATE UNIT ECONOMICS ENGINE v50.0 - ПОЛНАЯ ВЕРСИЯ С МНОЖЕСТВЕННЫМ ПАРСИНГОМ
 ================================================================================
-📌 ВЕРСИЯ: 49.0.0
+📌 ВЕРСИЯ: 50.0.0
 📌 НОВЫЕ ФУНКЦИИ:
-    ✅ Добавлен столбец ВЕС в основной файл
-    ✅ Добавлены КАТЕГОРИИ и ШТРИХКОДЫ в справочный файл
-    ✅ Автопоиск категории по наименованию
-    ✅ Загрузка готового файла и добавление новых данных
-    ✅ Конвертация размеров мм/см
-    ✅ Улучшенный парсинг конкурентов
-    ✅ Полная интеграция с API
+    ✅ Множественный парсинг по списку артикулов
+    ✅ Парсинг из файла (Excel/CSV) с колонками Артикул и Бренд
+    ✅ Прогресс-бар при парсинге
+    ✅ Экспорт результатов парсинга в CSV
+    ✅ Статистика по найденным/не найденным артикулам
 ================================================================================
 """
 
@@ -93,7 +91,7 @@ except ImportError:
 # КОНФИГУРАЦИЯ
 # --------------------------------------------
 CONFIG = {
-    "version": "49.0.0",
+    "version": "50.0.0",
     "app_name": "🚀 Юнит-экономика с конвертацией размеров",
     "currency": "₽",
     "marketplaces": ["Яндекс Маркет", "Ozon", "Wildberries", "AliExpress", "Мегамаркет"],
@@ -1118,10 +1116,10 @@ class OEMDatabase:
         return stats
 
 # --------------------------------------------
-# 🕷️ ПАРСЕРЫ ЦЕН КОНКУРЕНТОВ (УЛУЧШЕННЫЙ)
+# 🕷️ ПАРСЕРЫ ЦЕН КОНКУРЕНТОВ (С МНОЖЕСТВЕННЫМ ПАРСИНГОМ)
 # --------------------------------------------
 class CompetitorParser:
-    """Парсинг цен конкурентов с маркетплейсов"""
+    """Парсинг цен конкурентов с маркетплейсов (с поддержкой множественного парсинга)"""
     
     def __init__(self):
         self.cache = APICache()
@@ -1140,7 +1138,17 @@ class CompetitorParser:
         })
         self.retry_count = 3
         self.timeout = 15
+        self.progress_callback = None
         
+    def set_progress_callback(self, callback):
+        """Установка колбэка для отображения прогресса"""
+        self.progress_callback = callback
+        
+    def _update_progress(self, current: int, total: int, message: str = ""):
+        """Обновление прогресса"""
+        if self.progress_callback:
+            self.progress_callback(current, total, message)
+    
     @st.cache_data(ttl=300)
     def parse_yandex_market(_self, query: str, max_pages: int = 2) -> List[Dict]:
         """Парсинг Яндекс Маркета (улучшенный)"""
@@ -1463,6 +1471,198 @@ class CompetitorParser:
                 results[marketplace] = self._generate_demo_results(marketplace, query, 4)
         
         return results
+    
+    # ============================================================
+    # 🆕 МНОЖЕСТВЕННЫЙ ПАРСИНГ ПО АРТИКУЛАМ
+    # ============================================================
+    def parse_multiple_articles(self, articles: List[str], marketplace: str = "Все", max_pages: int = 1) -> Dict[str, Dict[str, List[Dict]]]:
+        """
+        Множественный парсинг по списку артикулов
+        
+        Args:
+            articles: Список артикулов для парсинга
+            marketplace: Маркетплейс ("Все", "Яндекс Маркет", "Ozon", "Wildberries")
+            max_pages: Максимальное количество страниц для каждого запроса
+        
+        Returns:
+            Dict: {артикул: {маркетплейс: [результаты]}}
+        """
+        results = {}
+        total = len(articles)
+        
+        for idx, article in enumerate(articles):
+            if not article or not article.strip():
+                continue
+            
+            article = article.strip()
+            self._update_progress(idx + 1, total, f"Парсинг артикула: {article}")
+            
+            results[article] = {}
+            
+            try:
+                if marketplace == "Все" or marketplace == "Яндекс Маркет":
+                    results[article]['Яндекс Маркет'] = self.parse_yandex_market(article, max_pages)
+                    time.sleep(1)
+                
+                if marketplace == "Все" or marketplace == "Ozon":
+                    results[article]['Ozon'] = self.parse_ozon(article, max_pages)
+                    time.sleep(1)
+                
+                if marketplace == "Все" or marketplace == "Wildberries":
+                    results[article]['Wildberries'] = self.parse_wildberries(article, max_pages)
+                    time.sleep(1)
+                
+                total_found = 0
+                for mp, items in results[article].items():
+                    total_found += len(items)
+                
+                if total_found == 0:
+                    for mp in results[article].keys():
+                        results[article][mp] = self._generate_demo_results(mp, article, 3)
+                
+            except Exception as e:
+                logger.error(f"Error parsing article {article}: {e}")
+                results[article] = {
+                    'error': str(e),
+                    'timestamp': datetime.now().isoformat()
+                }
+        
+        self._update_progress(total, total, "✅ Парсинг завершен!")
+        return results
+    
+    def parse_articles_from_file(self, file_bytes: bytes, article_column: str = "Артикул", 
+                                  brand_column: str = "Бренд", marketplace: str = "Все", 
+                                  max_pages: int = 1) -> Dict:
+        """
+        Парсинг артикулов из загруженного файла с колонками Артикул и Бренд
+        
+        Args:
+            file_bytes: Байты файла (Excel или CSV)
+            article_column: Название колонки с артикулами
+            brand_column: Название колонки с брендами
+            marketplace: Маркетплейс
+            max_pages: Максимальное количество страниц
+        
+        Returns:
+            Dict: Результаты парсинга
+        """
+        try:
+            if file_bytes[:4] == b'PK\x03\x04':
+                import io
+                df = pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
+            else:
+                df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8-sig')
+            
+            if df.empty:
+                return {"error": "Файл пуст"}
+            
+            # Ищем колонку с артикулами
+            if article_column not in df.columns:
+                for col in df.columns:
+                    col_lower = col.lower()
+                    if any(w in col_lower for w in ['артикул', 'article', 'sku', 'код', 'id']):
+                        article_column = col
+                        break
+                else:
+                    return {"error": f"Колонка '{article_column}' не найдена. Доступные: {list(df.columns)}"}
+            
+            # Ищем колонку с брендами
+            if brand_column not in df.columns:
+                for col in df.columns:
+                    col_lower = col.lower()
+                    if any(w in col_lower for w in ['бренд', 'brand', 'марка', 'производитель']):
+                        brand_column = col
+                        break
+                else:
+                    brand_column = None
+            
+            # Извлекаем артикулы и бренды
+            articles_data = []
+            for idx, row in df.iterrows():
+                article = safe_str(row[article_column])
+                if article and article.strip():
+                    brand = safe_str(row[brand_column]) if brand_column else ""
+                    articles_data.append({
+                        'article': article.strip(),
+                        'brand': brand
+                    })
+            
+            if not articles_data:
+                return {"error": "Нет артикулов для парсинга"}
+            
+            # Выполняем множественный парсинг
+            results = self.parse_multiple_articles(
+                [a['article'] for a in articles_data], 
+                marketplace, 
+                max_pages
+            )
+            
+            # Добавляем бренды к результатам
+            brand_map = {a['article']: a['brand'] for a in articles_data}
+            for article, brand in brand_map.items():
+                if article in results:
+                    results[article]['_brand'] = brand
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error parsing file: {e}")
+            return {"error": str(e)}
+    
+    def format_multiple_results(self, results: Dict) -> pd.DataFrame:
+        """Форматирование результатов множественного парсинга в DataFrame"""
+        rows = []
+        
+        for article, data in results.items():
+            if isinstance(data, dict) and 'error' in data:
+                rows.append({
+                    'Артикул': article,
+                    'Бренд': data.get('_brand', ''),
+                    'Маркетплейс': 'Ошибка',
+                    'Наименование': '',
+                    'Цена': 0,
+                    'Статус': f"Ошибка: {data.get('error', '')}",
+                    'URL': '',
+                    'ID': ''
+                })
+                continue
+            
+            brand = data.get('_brand', '')
+            
+            for marketplace, items in data.items():
+                if marketplace == '_brand':
+                    continue
+                
+                if not items:
+                    rows.append({
+                        'Артикул': article,
+                        'Бренд': brand,
+                        'Маркетплейс': marketplace,
+                        'Наименование': 'Не найдено',
+                        'Цена': 0,
+                        'Статус': 'Не найдено',
+                        'URL': '',
+                        'ID': ''
+                    })
+                else:
+                    for item in items[:5]:
+                        rows.append({
+                            'Артикул': article,
+                            'Бренд': brand,
+                            'Маркетплейс': marketplace,
+                            'Наименование': item.get('name', ''),
+                            'Цена': item.get('price', 0),
+                            'Статус': 'Демо' if item.get('is_demo', False) else 'Найден',
+                            'URL': item.get('url', ''),
+                            'ID': item.get('offer_id', item.get('product_id', item.get('nm_id', '')))
+                        })
+        
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            # Сортируем по артикулу и маркетплейсу
+            df = df.sort_values(['Артикул', 'Маркетплейс']).reset_index(drop=True)
+        
+        return df
 
 # --------------------------------------------
 # 🏪 УПРАВЛЕНИЕ КОНКУРЕНТАМИ
@@ -1651,7 +1851,8 @@ class AITariffProvider:
     def _get_ai_rates(self, marketplace: str, mode: str) -> Optional[Dict]:
         """Получение тарифов через AI API"""
         if not self.api_key:
-            return None            
+            return None
+            
         try:
             prompt = f"""
             Предоставь актуальные тарифы для маркетплейса {marketplace} 
@@ -1973,7 +2174,6 @@ class UnitEconomicsEngine:
         if price <= 0:
             return None
         
-        # Если категория не указана, ищем по наименованию
         if not category or category == "" or category == "Прочее":
             category, confidence = self.classifier.classify(name)
         
@@ -3091,10 +3291,10 @@ class ExcelExportEngine:
             return []
 
 # --------------------------------------------
-# 🎨 ОСНОВНОЕ ПРИЛОЖЕНИЕ (ПРОДОЛЖЕНИЕ)
+# 🎨 ОСНОВНОЕ ПРИЛОЖЕНИЕ
 # --------------------------------------------
 class UnitEconomicsApp:
-    """Главное приложение с конвертацией размеров"""
+    """Главное приложение с конвертацией размеров и множественным парсингом"""
     
     def __init__(self):
         self.classifier = CategoryClassifier()
@@ -3147,7 +3347,7 @@ class UnitEconomicsApp:
                 🚀 {CONFIG['app_name']}
             </h1>
             <p style="font-size: 1.2rem; opacity: 0.95; margin-top: 0.3rem;">
-                📊 <strong>Товарная модель (B2C)</strong> | 2 файла | OE база | Конвертация размеров
+                📊 <strong>Товарная модель (B2C)</strong> | 2 файла | OE база | Конвертация размеров | Множественный парсинг
             </p>
             <div style="display: flex; justify-content: center; gap: 0.8rem; flex-wrap: wrap; margin-top: 0.5rem;">
                 <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
@@ -3166,7 +3366,7 @@ class UnitEconomicsApp:
                     📤 Telegram
                 </span>
                 <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
-                    📋 Категории+ШК
+                    📋 Множественный парсинг
                 </span>
             </div>
         </div>
@@ -3488,7 +3688,6 @@ class UnitEconomicsApp:
                             st.session_state.existing_data = loaded
                             st.success(f"✅ Загружено {len(loaded)} записей!")
                             
-                            # Показываем превью
                             df_preview = pd.DataFrame([{
                                 "Артикул": r.get("article", ""),
                                 "Наименование": r.get("name", "")[:30],
@@ -3533,7 +3732,6 @@ class UnitEconomicsApp:
                         )
                         
                         if new_results:
-                            # Объединяем с существующими данными
                             existing_articles = {r.get("article", "") for r in self.existing_data}
                             added_count = 0
                             updated_count = 0
@@ -3541,14 +3739,12 @@ class UnitEconomicsApp:
                             for new_row in new_results:
                                 article = new_row.get("article", "")
                                 if article in existing_articles:
-                                    # Обновляем существующую запись
                                     for i, existing in enumerate(self.existing_data):
                                         if existing.get("article") == article:
                                             self.existing_data[i] = new_row
                                             updated_count += 1
                                             break
                                 else:
-                                    # Добавляем новую запись
                                     self.existing_data.append(new_row)
                                     added_count += 1
                             
@@ -3556,7 +3752,6 @@ class UnitEconomicsApp:
                             self.results = self.existing_data
                             st.session_state.results = self.existing_data
                             
-                            # Показываем превью обновленных данных
                             df_preview = pd.DataFrame([{
                                 "Артикул": r.get("article", ""),
                                 "Наименование": r.get("name", "")[:30],
@@ -3751,7 +3946,6 @@ class UnitEconomicsApp:
                         barcode = ref_data.get("barcode", "")
                         oe_number = ref_data.get("oe_number", "")
                         
-                        # Поиск в базе OE
                         oe_data = self.engine.oem_db.get_by_oe(oe_number) if oe_number else None
                         
                         if oe_data:
@@ -3773,7 +3967,6 @@ class UnitEconomicsApp:
                             if not barcode:
                                 barcode = oe_data.get("barcode", "")
                         
-                        # Определяем категорию
                         category = category_ref
                         if not category or category == "" or category == "Прочее":
                             if name:
@@ -3784,7 +3977,6 @@ class UnitEconomicsApp:
                         if not name:
                             name = f"{brand} {oe_number}" if brand and oe_number else article
                         
-                        # Извлекаем штрихкод если не найден
                         if not barcode and name:
                             extracted_barcode = self.classifier.extract_barcode(name)
                             if extracted_barcode:
@@ -4187,7 +4379,7 @@ class UnitEconomicsApp:
                 st.warning("⚠️ Функция в разработке. Требуется настройка API ключей.")
     
     def _render_parsing_tab(self):
-        """Вкладка парсинга конкурентов"""
+        """Вкладка парсинга конкурентов с поддержкой множественного парсинга"""
         st.subheader("🕷️ Парсинг цен конкурентов")
         
         st.markdown("""
@@ -4200,6 +4392,19 @@ class UnitEconomicsApp:
         если маркетплейсы блокируют запросы.
         """)
         
+        parse_tabs = st.tabs(["🔍 Одиночный поиск", "📋 Множественный парсинг", "📁 Из файла"])
+        
+        with parse_tabs[0]:
+            self._render_single_parse()
+        
+        with parse_tabs[1]:
+            self._render_multiple_parse()
+        
+        with parse_tabs[2]:
+            self._render_file_parse()
+    
+    def _render_single_parse(self):
+        """Одиночный парсинг по запросу"""
         col1, col2 = st.columns(2)
         
         with col1:
@@ -4285,6 +4490,235 @@ class UnitEconomicsApp:
                             st.warning("⚠️ Нет данных для анализа")
                 else:
                     st.warning("⚠️ Сначала рассчитайте юнит-экономику")
+    
+    def _render_multiple_parse(self):
+        """Множественный парсинг по списку артикулов"""
+        st.markdown("### 📋 Множественный парсинг по артикулам")
+        
+        st.info("""
+        **Введите артикулы для парсинга:**
+        - Каждый артикул на новой строке
+        - Можно скопировать из Excel/CSV
+        - Поддерживается до 100 артикулов за раз
+        """)
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            articles_text = st.text_area(
+                "📝 Список артикулов",
+                placeholder="Например:\n123456\n789012\n345678\n901234",
+                height=150,
+                key="multiple_articles"
+            )
+        
+        with col2:
+            marketplace = st.selectbox(
+                "Маркетплейс",
+                ["Все", "Яндекс Маркет", "Ozon", "Wildberries"],
+                key="multiple_marketplace"
+            )
+            
+            max_pages = st.number_input(
+                "Макс. страниц",
+                min_value=1,
+                max_value=5,
+                value=1,
+                key="multiple_pages"
+            )
+            
+            st.caption("⚠️ Больше страниц = дольше парсинг")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🚀 Начать множественный парсинг", type="primary", use_container_width=True, key="start_multiple_parse"):
+                if articles_text.strip():
+                    articles = [a.strip() for a in articles_text.strip().split('\n') if a.strip()]
+                    
+                    if len(articles) > 100:
+                        st.warning(f"⚠️ Слишком много артикулов ({len(articles)}). Максимум 100.")
+                    else:
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        parser = CompetitorParser()
+                        
+                        def update_progress(current, total, message):
+                            progress_bar.progress(current / total)
+                            status_text.text(f"⏳ {message} ({current}/{total})")
+                        
+                        parser.set_progress_callback(update_progress)
+                        
+                        results = parser.parse_multiple_articles(articles, marketplace, max_pages)
+                        
+                        progress_bar.progress(1.0)
+                        status_text.text("✅ Парсинг завершен!")
+                        
+                        if results:
+                            st.success(f"✅ Обработано {len(results)} артикулов!")
+                            
+                            df = parser.format_multiple_results(results)
+                            
+                            if not df.empty:
+                                df['Цена'] = df['Цена'].apply(lambda x: format_currency(x) if x else '0 ₽')
+                                st.dataframe(df, use_container_width=True, hide_index=True)
+                                
+                                st.divider()
+                                col1, col2, col3 = st.columns(3)
+                                
+                                found_count = len(df[df['Статус'] == 'Найден'])
+                                demo_count = len(df[df['Статус'] == 'Демо'])
+                                not_found = len(df[df['Статус'] == 'Не найдено'])
+                                
+                                col1.metric("✅ Найдено", found_count)
+                                col2.metric("🧪 Демо", demo_count)
+                                col3.metric("❌ Не найдено", not_found)
+                                
+                                csv = df.to_csv(index=False, encoding='utf-8-sig')
+                                st.download_button(
+                                    "📥 Скачать результаты (CSV)",
+                                    data=csv,
+                                    file_name=f"парсинг_артикулов_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
+                else:
+                    st.warning("⚠️ Введите хотя бы один артикул")
+        
+        with col2:
+            if st.button("🧹 Очистить список", use_container_width=True, key="clear_articles"):
+                st.session_state.multiple_articles = ""
+                st.rerun()
+        
+        with col3:
+            if st.button("📋 Загрузить пример", use_container_width=True, key="load_example_articles"):
+                example = "123456\n789012\n345678\n901234\n567890"
+                st.session_state.multiple_articles = example
+                st.rerun()
+    
+    def _render_file_parse(self):
+        """Парсинг из файла с колонками Артикул и Бренд"""
+        st.markdown("### 📁 Парсинг из файла")
+        
+        st.info("""
+        **Загрузите файл с артикулами и брендами:**
+        - Поддерживаются Excel (.xlsx, .xls) и CSV (.csv)
+        - В файле должны быть колонки: **Артикул** и **Бренд**
+        - Автоматическое определение колонок
+        """)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            file_upload = st.file_uploader(
+                "📂 Загрузите файл с артикулами и брендами",
+                type=["xlsx", "xls", "csv"],
+                key="file_articles"
+            )
+        
+        with col2:
+            if file_upload:
+                try:
+                    if file_upload.name.endswith('.csv'):
+                        df_preview = pd.read_csv(file_upload, encoding='utf-8-sig', nrows=5)
+                    else:
+                        df_preview = pd.read_excel(file_upload, engine='openpyxl', nrows=5)
+                    
+                    st.caption("📋 Превью файла:")
+                    st.dataframe(df_preview, use_container_width=True, hide_index=True)
+                    
+                    # Показываем найденные колонки
+                    article_col = None
+                    brand_col = None
+                    for col in df_preview.columns:
+                        col_lower = col.lower()
+                        if any(w in col_lower for w in ['артикул', 'article', 'sku', 'код', 'id']):
+                            article_col = col
+                        elif any(w in col_lower for w in ['бренд', 'brand', 'марка', 'производитель']):
+                            brand_col = col
+                    
+                    if article_col:
+                        st.success(f"✅ Найдена колонка с артикулами: '{article_col}'")
+                    else:
+                        st.warning("⚠️ Колонка с артикулами не найдена")
+                    
+                    if brand_col:
+                        st.success(f"✅ Найдена колонка с брендами: '{brand_col}'")
+                    else:
+                        st.info("ℹ️ Колонка с брендами не найдена (необязательно)")
+                except:
+                    pass
+        
+        if file_upload:
+            marketplace = st.selectbox(
+                "Маркетплейс",
+                ["Все", "Яндекс Маркет", "Ozon", "Wildberries"],
+                key="file_marketplace"
+            )
+            
+            max_pages = st.number_input(
+                "Макс. страниц",
+                min_value=1,
+                max_value=5,
+                value=1,
+                key="file_pages"
+            )
+            
+            if st.button("🚀 Парсить из файла", type="primary", use_container_width=True, key="start_file_parse"):
+                with st.spinner("⏳ Парсинг артикулов из файла..."):
+                    parser = CompetitorParser()
+                    
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    def update_progress(current, total, message):
+                        progress_bar.progress(current / total)
+                        status_text.text(f"⏳ {message} ({current}/{total})")
+                    
+                    parser.set_progress_callback(update_progress)
+                    
+                    results = parser.parse_articles_from_file(
+                        file_upload.getvalue(),
+                        "Артикул",
+                        "Бренд",
+                        marketplace,
+                        max_pages
+                    )
+                    
+                    progress_bar.progress(1.0)
+                    status_text.text("✅ Парсинг завершен!")
+                    
+                    if isinstance(results, dict) and "error" in results:
+                        st.error(f"❌ {results['error']}")
+                    elif results:
+                        st.success(f"✅ Обработано {len(results)} артикулов!")
+                        
+                        df = parser.format_multiple_results(results)
+                        
+                        if not df.empty:
+                            df['Цена'] = df['Цена'].apply(lambda x: format_currency(x) if x else '0 ₽')
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+                            
+                            st.divider()
+                            col1, col2, col3 = st.columns(3)
+                            
+                            found_count = len(df[df['Статус'] == 'Найден'])
+                            demo_count = len(df[df['Статус'] == 'Демо'])
+                            not_found = len(df[df['Статус'] == 'Не найдено'])
+                            
+                            col1.metric("✅ Найдено", found_count)
+                            col2.metric("🧪 Демо", demo_count)
+                            col3.metric("❌ Не найдено", not_found)
+                            
+                            csv = df.to_csv(index=False, encoding='utf-8-sig')
+                            st.download_button(
+                                "📥 Скачать результаты (CSV)",
+                                data=csv,
+                                file_name=f"парсинг_файла_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
     
     def _render_autoupload_tab(self):
         """Вкладка автовыгрузки"""
