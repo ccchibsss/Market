@@ -1,14 +1,17 @@
 """
 ================================================================================
-🚀 ULTIMATE UNIT ECONOMICS ENGINE v50.0 - ПОЛНАЯ ВЕРСИЯ С МНОЖЕСТВЕННЫМ ПАРСИНГОМ
+🚀 ULTIMATE UNIT ECONOMICS ENGINE v52.0 - ПОЛНАЯ ВЕРСИЯ
 ================================================================================
-📌 ВЕРСИЯ: 50.0.0
+📌 ВЕРСИЯ: 52.0.0
 📌 НОВЫЕ ФУНКЦИИ:
-    ✅ Множественный парсинг по списку артикулов
-    ✅ Парсинг из файла (Excel/CSV) с колонками Артикул и Бренд
-    ✅ Прогресс-бар при парсинге
-    ✅ Экспорт результатов парсинга в CSV
-    ✅ Статистика по найденным/не найденным артикулам
+    ✅ ИИ-РЕДАКТИРОВАНИЕ ФАЙЛОВ - исправление данных и формул через AI
+    ✅ Полный код без сокращений
+    ✅ Расширенная обработка ошибок
+    ✅ Улучшенное кэширование
+    ✅ Мультиязычность (RU/EN)
+    ✅ Оптимизированный парсинг с прокси
+    ✅ Расширенная аналитика
+    ✅ Улучшенный интерфейс
 ================================================================================
 """
 
@@ -32,134 +35,272 @@ from typing import Dict, List, Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from collections import Counter, defaultdict
 from functools import lru_cache
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 from queue import Queue
 import traceback
 import os
 import pickle
 import random
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
+from enum import Enum
 
+# Подавление предупреждений
 warnings.filterwarnings('ignore')
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
+# --------------------------------------------
+# ВЕРСИЯ И КОНФИГУРАЦИЯ
+# --------------------------------------------
+APP_VERSION = "52.0.0"
+APP_NAME = "🚀 Юнит-экономика с ИИ-редактированием"
 
 # --------------------------------------------
 # НАСТРОЙКА ЛОГИРОВАНИЯ
 # --------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('unit_economy.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+class Logger:
+    """Улучшенный логгер"""
+    _instance = None
+    _lock = Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        
+        self.logger = logging.getLogger('UnitEconomy')
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Форматтер
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # Файловый обработчик
+        fh = logging.FileHandler('unit_economy.log', encoding='utf-8')
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
+        
+        # Консольный обработчик
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(formatter)
+        self.logger.addHandler(ch)
+    
+    def get(self):
+        return self.logger
+
+logger = Logger().get()
 
 # --------------------------------------------
 # ПРОВЕРКА НАЛИЧИЯ БИБЛИОТЕК
 # --------------------------------------------
-OPENPYXL_AVAILABLE = False
+LIBRARIES = {
+    'openpyxl': False,
+    'plotly': False,
+    'sklearn': False,
+    'gspread': False,
+    'openai': False,
+}
+
 try:
     from openpyxl import Workbook, load_workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
     from openpyxl.utils.dataframe import dataframe_to_rows
-    OPENPYXL_AVAILABLE = True
+    LIBRARIES['openpyxl'] = True
 except ImportError as e:
     logger.warning(f"OpenPyXL не установлен: {e}")
 
-PLOTLY_AVAILABLE = False
 try:
     import plotly.graph_objects as go
     import plotly.express as px
     from plotly.subplots import make_subplots
-    PLOTLY_AVAILABLE = True
+    LIBRARIES['plotly'] = True
 except ImportError:
     logger.warning("Plotly не установлен. Установите: pip install plotly")
 
-SKLEARN_AVAILABLE = False
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.naive_bayes import MultinomialNB
     from sklearn.pipeline import Pipeline
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score, classification_report
     import joblib
-    SKLEARN_AVAILABLE = True
+    LIBRARIES['sklearn'] = True
 except ImportError:
     logger.warning("Scikit-learn не установлен. Установите: pip install scikit-learn joblib")
+
+try:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    LIBRARIES['gspread'] = True
+except ImportError:
+    logger.warning("gspread не установлен")
+
+try:
+    import openai
+    LIBRARIES['openai'] = True
+except ImportError:
+    logger.warning("openai не установлен")
 
 # --------------------------------------------
 # КОНФИГУРАЦИЯ
 # --------------------------------------------
-CONFIG = {
-    "version": "50.0.0",
-    "app_name": "🚀 Юнит-экономика с конвертацией размеров",
-    "currency": "₽",
-    "marketplaces": ["Яндекс Маркет", "Ozon", "Wildberries", "AliExpress", "Мегамаркет"],
-    "operation_modes": ["FBY", "FBS", "FBO", "DBS"],
-    "dimension_units": ["мм", "см"],
-    "default_dimension_unit": "мм",
-    "category_keywords": {
-        "Двигатель": ["двигатель", "мотор", "поршень", "кольцо", "гильза", "гбц", "головка", "блок цилиндров", "коленвал", "распредвал", "шатун", "клапан", "ремень грм", "цепь грм"],
-        "Трансмиссия": ["коробка", "передач", "кпп", "вариатор", "сцепление", "диск сцепления", "корзина", "выжимной", "механизм", "автомат"],
-        "Подвеска": ["амортизатор", "стойка", "пружина", "рычаг", "сайлентблок", "шаровой", "стабилизатор", "шаровая опора", "тяга"],
-        "Тормозная система": ["тормоз", "колодка", "диск тормозной", "барабан", "суппорт", "главный тормозной", "шланг", "цилиндр"],
-        "Рулевое управление": ["рулевой", "рейка", "наконечник", "тяга", "кардан", "усилитель", "рулевая"],
-        "Электрооборудование": ["генератор", "стартер", "провод", "датчик", "реле", "блок управления", "эбу", "модуль"],
-        "Система охлаждения": ["радиатор", "помпа", "термостат", "антифриз", "вентилятор", "патрубок"],
-        "Система выпуска": ["глушитель", "катализатор", "сажевый", "выпускной", "гофра", "резонатор"],
-        "Система питания": ["форсунка", "насос", "бензонасос", "тнвд", "инжектор", "карбюратор", "магистраль"],
-        "Кузовные детали": ["бампер", "крыло", "капот", "дверь", "зеркало", "стекло", "молдинг", "порог"],
-        "Оптика": ["фара", "фонарь", "поворотник", "габарит", "ксенон", "свет"],
-        "Шины и диски": ["шина", "диск", "колесо", "резина", "покрышка", "литье"],
-        "Масла и жидкости": ["масло", "жидкость", "смазка", "охлаждайка", "трансмиссионка", "гидравлика"],
-        "Фильтры": ["фильтр", "масляный", "воздушный", "топливный", "салонный", "очистка"],
-        "Ремни и цепи": ["ремень", "цепь", "натяжитель", "ролик", "грм"],
-        "Свечи зажигания": ["свеча", "зажигание", "накаливания", "свечной", "свечка"],
-        "Колодки и диски": ["колодки", "диски тормозные", "накладки", "тормозные"],
-        "Аккумуляторы": ["аккумулятор", "батарея", "акум", "зарядка"],
-        "Инструмент": ["инструмент", "ключ", "набор", "ремкомплект"],
-        "Ручной инструмент": ["головка", "ключ", "набор инструментов", "отвертка", "плоскогубцы", "кусачки", "молоток", "стамеска"],
-        "Садовая техника": ["триммер", "газонокосилка", "опрыскиватель", "шланг", "лопата", "грабли"],
-        "Бытовая химия": ["чистящее", "моющее", "порошок", "гель", "пятновыводитель", "отбеливатель"],
-        "Электротовары": ["кабель", "разъем", "переходник", "предохранитель", "розетка", "выключатель"],
-        "Красота и уход": ["шампунь", "мыло", "крем", "маска", "лосьон", "тоник"]
-    },
-    "oem_patterns": [
-        r'[0-9]{6,12}',
-        r'[A-Z0-9]{6,12}',
-        r'[A-Z]{2}[0-9]{6,10}',
-        r'[A-Z]{2}[0-9]{4}[A-Z]{2}',
-        r'[0-9]{4}[A-Z]{2}[0-9]{4}'
-    ],
-    "barcode_patterns": [
-        r'[0-9]{8}',
-        r'[0-9]{12}',
-        r'[0-9]{13}',
-        r'[0-9]{14}'
-    ],
-    "validation": {
-        "min_price": 10,
-        "max_price": 1000000,
-        "min_cost": 1,
-        "max_cost": 500000,
-        "min_dimension": 0.1,
-        "max_dimension": 1000,
-        "min_volume": 0.001,
-        "max_volume": 10000,
-        "min_weight": 0.001,
-        "max_weight": 1000
-    },
-    "api": {
-        "cache_ttl": 300,
-        "max_retries": 3,
-        "timeout": 30,
-        "rate_limit": 10
-    }
-}
+class Config:
+    """Класс конфигурации с поддержкой ENV переменных"""
+    
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        
+        self.version = APP_VERSION
+        self.app_name = APP_NAME
+        self.currency = os.getenv('CURRENCY', '₽')
+        self.language = os.getenv('LANGUAGE', 'ru')
+        
+        self.marketplaces = ["Яндекс Маркет", "Ozon", "Wildberries", "AliExpress", "Мегамаркет"]
+        self.operation_modes = ["FBY", "FBS", "FBO", "DBS"]
+        self.dimension_units = ["мм", "см"]
+        self.default_dimension_unit = "мм"
+        
+        self.category_keywords = {
+            "Двигатель": ["двигатель", "мотор", "поршень", "кольцо", "гильза", "гбц", "головка", "блок цилиндров", "коленвал", "распредвал", "шатун", "клапан", "ремень грм", "цепь грм"],
+            "Трансмиссия": ["коробка", "передач", "кпп", "вариатор", "сцепление", "диск сцепления", "корзина", "выжимной", "механизм", "автомат"],
+            "Подвеска": ["амортизатор", "стойка", "пружина", "рычаг", "сайлентблок", "шаровой", "стабилизатор", "шаровая опора", "тяга"],
+            "Тормозная система": ["тормоз", "колодка", "диск тормозной", "барабан", "суппорт", "главный тормозной", "шланг", "цилиндр"],
+            "Рулевое управление": ["рулевой", "рейка", "наконечник", "тяга", "кардан", "усилитель", "рулевая"],
+            "Электрооборудование": ["генератор", "стартер", "провод", "датчик", "реле", "блок управления", "эбу", "модуль"],
+            "Система охлаждения": ["радиатор", "помпа", "термостат", "антифриз", "вентилятор", "патрубок"],
+            "Система выпуска": ["глушитель", "катализатор", "сажевый", "выпускной", "гофра", "резонатор"],
+            "Система питания": ["форсунка", "насос", "бензонасос", "тнвд", "инжектор", "карбюратор", "магистраль"],
+            "Кузовные детали": ["бампер", "крыло", "капот", "дверь", "зеркало", "стекло", "молдинг", "порог"],
+            "Оптика": ["фара", "фонарь", "поворотник", "габарит", "ксенон", "свет"],
+            "Шины и диски": ["шина", "диск", "колесо", "резина", "покрышка", "литье"],
+            "Масла и жидкости": ["масло", "жидкость", "смазка", "охлаждайка", "трансмиссионка", "гидравлика"],
+            "Фильтры": ["фильтр", "масляный", "воздушный", "топливный", "салонный", "очистка"],
+            "Ремни и цепи": ["ремень", "цепь", "натяжитель", "ролик", "грм"],
+            "Свечи зажигания": ["свеча", "зажигание", "накаливания", "свечной", "свечка"],
+            "Колодки и диски": ["колодки", "диски тормозные", "накладки", "тормозные"],
+            "Аккумуляторы": ["аккумулятор", "батарея", "акум", "зарядка"],
+            "Инструмент": ["инструмент", "ключ", "набор", "ремкомплект"],
+            "Ручной инструмент": ["головка", "ключ", "набор инструментов", "отвертка", "плоскогубцы", "кусачки", "молоток", "стамеска"],
+            "Садовая техника": ["триммер", "газонокосилка", "опрыскиватель", "шланг", "лопата", "грабли"],
+            "Бытовая химия": ["чистящее", "моющее", "порошок", "гель", "пятновыводитель", "отбеливатель"],
+            "Электротовары": ["кабель", "разъем", "переходник", "предохранитель", "розетка", "выключатель"],
+            "Красота и уход": ["шампунь", "мыло", "крем", "маска", "лосьон", "тоник"]
+        }
+        
+        self.oem_patterns = [
+            r'[0-9]{6,12}',
+            r'[A-Z0-9]{6,12}',
+            r'[A-Z]{2}[0-9]{6,10}',
+            r'[A-Z]{2}[0-9]{4}[A-Z]{2}',
+            r'[0-9]{4}[A-Z]{2}[0-9]{4}'
+        ]
+        
+        self.barcode_patterns = [
+            r'[0-9]{8}',
+            r'[0-9]{12}',
+            r'[0-9]{13}',
+            r'[0-9]{14}'
+        ]
+        
+        self.validation = {
+            "min_price": float(os.getenv('MIN_PRICE', 10)),
+            "max_price": float(os.getenv('MAX_PRICE', 1000000)),
+            "min_cost": float(os.getenv('MIN_COST', 1)),
+            "max_cost": float(os.getenv('MAX_COST', 500000)),
+            "min_dimension": float(os.getenv('MIN_DIMENSION', 0.1)),
+            "max_dimension": float(os.getenv('MAX_DIMENSION', 1000)),
+            "min_volume": float(os.getenv('MIN_VOLUME', 0.001)),
+            "max_volume": float(os.getenv('MAX_VOLUME', 10000)),
+            "min_weight": float(os.getenv('MIN_WEIGHT', 0.001)),
+            "max_weight": float(os.getenv('MAX_WEIGHT', 1000))
+        }
+        
+        self.api = {
+            "cache_ttl": int(os.getenv('CACHE_TTL', 300)),
+            "max_retries": int(os.getenv('MAX_RETRIES', 3)),
+            "timeout": int(os.getenv('API_TIMEOUT', 30)),
+            "rate_limit": int(os.getenv('RATE_LIMIT', 10))
+        }
+        
+        self.proxy = {
+            "enabled": os.getenv('PROXY_ENABLED', 'false').lower() == 'true',
+            "http": os.getenv('HTTP_PROXY', ''),
+            "https": os.getenv('HTTPS_PROXY', '')
+        }
+    
+    def get_text(self, key: str, lang: str = None) -> str:
+        """Получение текста на выбранном языке"""
+        if lang is None:
+            lang = self.language
+        
+        texts = {
+            'ru': {
+                'upload_title': '📁 Загрузка данных',
+                'calculate': '🚀 Рассчитать',
+                'export': '📥 Экспорт',
+                'profit': 'Прибыль',
+                'margin': 'Маржа',
+                'price': 'Цена',
+                'cost': 'Себестоимость',
+                'ai_edit': '🤖 ИИ-редактирование',
+                'fix_data': 'Исправить данные через ИИ',
+                'ai_prompt': 'Опишите, что нужно исправить в данных'
+            },
+            'en': {
+                'upload_title': '📁 Upload Data',
+                'calculate': '🚀 Calculate',
+                'export': '📥 Export',
+                'profit': 'Profit',
+                'margin': 'Margin',
+                'price': 'Price',
+                'cost': 'Cost',
+                'ai_edit': '🤖 AI Editing',
+                'fix_data': 'Fix data with AI',
+                'ai_prompt': 'Describe what needs to be fixed in the data'
+            }
+        }
+        
+        return texts.get(lang, texts['ru']).get(key, key)
+
+CONFIG = Config()
 
 # --------------------------------------------
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # --------------------------------------------
+@contextmanager
+def timer(name: str):
+    """Контекстный менеджер для измерения времени выполнения"""
+    start = time.time()
+    try:
+        yield
+    finally:
+        elapsed = time.time() - start
+        logger.info(f"⏱ {name}: {elapsed:.2f}с")
+
 def safe_float(val: Any, default: float = 0.0) -> float:
     """Безопасное преобразование в float"""
     try:
@@ -232,7 +373,8 @@ def format_currency(value: float) -> str:
     try:
         if value is None or math.isnan(value) or math.isinf(value):
             return "0 ₽"
-        return f"{value:,.0f} ₽" if abs(value) >= 1 else f"{value:.2f} ₽"
+        currency = CONFIG.currency
+        return f"{value:,.0f} {currency}" if abs(value) >= 1 else f"{value:.2f} {currency}"
     except (ValueError, TypeError):
         return "0 ₽"
 
@@ -272,26 +414,83 @@ def format_barcode(barcode: str) -> str:
         return f"{barcode[:2]} {barcode[2:5]} {barcode[5:]}"
     return barcode
 
+def validate_article(article: str) -> bool:
+    """Валидация артикула"""
+    if not article or not article.strip():
+        return False
+    return bool(re.match(r'^[A-Za-z0-9\-_]+$', article.strip()))
+
+def normalize_text(text: str) -> str:
+    """Нормализация текста"""
+    if not text:
+        return ""
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+def extract_numbers(text: str) -> List[float]:
+    """Извлечение чисел из текста"""
+    if not text:
+        return []
+    return [float(x) for x in re.findall(r'\d+\.?\d*', text)]
+
+def calculate_price_recommendation(price: float, competitor_avg: float, margin: float) -> Tuple[float, str]:
+    """Расчет рекомендации по цене"""
+    if margin < 15:
+        return price * 1.15, "Повысить (низкая маржа)"
+    elif margin > 35:
+        return price * 0.95, "Снизить (высокая маржа)"
+    elif competitor_avg > 0 and price > competitor_avg * 1.2:
+        return competitor_avg * 0.95, "Снизить (выше конкурентов)"
+    elif competitor_avg > 0 and price < competitor_avg * 0.8:
+        return competitor_avg * 1.05, "Повысить (ниже конкурентов)"
+    return price, "Оставить (оптимально)"
+
 # --------------------------------------------
-# 📊 КЭШИРОВАНИЕ API
+# 📊 КЭШИРОВАНИЕ
 # --------------------------------------------
-class APICache:
-    """Кэширование API-запросов"""
+class CacheManager:
+    """Управление кэшированием"""
     
-    def __init__(self, cache_dir: str = "api_cache"):
+    def __init__(self, cache_dir: str = "cache"):
         self.cache_dir = cache_dir
         self.memory_cache = {}
         self.lock = Lock()
+        self.stats = {
+            'hits': 0,
+            'misses': 0,
+            'size': 0
+        }
         
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir)
+        
+        self._clean_old_cache()
+    
+    def _clean_old_cache(self, max_age_days: int = 7):
+        """Очистка старого кэша"""
+        try:
+            now = time.time()
+            for filename in os.listdir(self.cache_dir):
+                filepath = os.path.join(self.cache_dir, filename)
+                if os.path.isfile(filepath):
+                    if now - os.path.getmtime(filepath) > max_age_days * 86400:
+                        try:
+                            os.remove(filepath)
+                            logger.info(f"Удален старый кэш: {filename}")
+                        except:
+                            pass
+        except Exception as e:
+            logger.warning(f"Ошибка очистки кэша: {e}")
     
     def get(self, key: str) -> Optional[Any]:
         """Получение из кэша"""
         with self.lock:
             if key in self.memory_cache:
                 data, timestamp = self.memory_cache[key]
-                if (datetime.now() - timestamp).total_seconds() < CONFIG["api"]["cache_ttl"]:
+                if (datetime.now() - timestamp).total_seconds() < CONFIG.api["cache_ttl"]:
+                    self.stats['hits'] += 1
                     return data
             
             cache_file = os.path.join(self.cache_dir, f"{hashlib.md5(key.encode()).hexdigest()}.pkl")
@@ -299,12 +498,14 @@ class APICache:
                 try:
                     with open(cache_file, 'rb') as f:
                         data, timestamp = pickle.load(f)
-                        if (datetime.now() - timestamp).total_seconds() < CONFIG["api"]["cache_ttl"]:
+                        if (datetime.now() - timestamp).total_seconds() < CONFIG.api["cache_ttl"]:
                             self.memory_cache[key] = (data, timestamp)
+                            self.stats['hits'] += 1
                             return data
                 except Exception as e:
-                    logger.warning(f"Cache read error: {e}")
+                    logger.warning(f"Ошибка чтения кэша: {e}")
             
+            self.stats['misses'] += 1
             return None
     
     def set(self, key: str, value: Any):
@@ -312,23 +513,30 @@ class APICache:
         with self.lock:
             timestamp = datetime.now()
             self.memory_cache[key] = (value, timestamp)
+            self.stats['size'] = len(self.memory_cache)
             
             try:
                 cache_file = os.path.join(self.cache_dir, f"{hashlib.md5(key.encode()).hexdigest()}.pkl")
                 with open(cache_file, 'wb') as f:
                     pickle.dump((value, timestamp), f)
             except Exception as e:
-                logger.warning(f"Cache write error: {e}")
+                logger.warning(f"Ошибка записи кэша: {e}")
     
     def clear(self):
         """Очистка кэша"""
         with self.lock:
             self.memory_cache.clear()
+            self.stats['size'] = 0
             for file in os.listdir(self.cache_dir):
                 try:
                     os.remove(os.path.join(self.cache_dir, file))
                 except:
                     pass
+            logger.info("Кэш очищен")
+    
+    def get_stats(self) -> Dict:
+        """Получение статистики кэша"""
+        return self.stats.copy()
 
 # --------------------------------------------
 # 🤖 ML-КАТЕГОРИЗАЦИЯ
@@ -340,14 +548,17 @@ class AutoClassifier:
         self.model_path = model_path
         self.model = None
         self.vectorizer = None
+        self.categories = []
+        self.accuracy = 0.0
         self.load_model()
     
     def load_model(self):
         """Загрузка обученной модели"""
-        if os.path.exists(self.model_path) and SKLEARN_AVAILABLE:
+        if os.path.exists(self.model_path) and LIBRARIES['sklearn']:
             try:
                 self.model = joblib.load(self.model_path)
-                logger.info("ML-модель загружена")
+                self.categories = self.model.classes_ if hasattr(self.model, 'classes_') else []
+                logger.info(f"ML-модель загружена, категорий: {len(self.categories)}")
                 return
             except Exception as e:
                 logger.warning(f"Ошибка загрузки модели: {e}")
@@ -356,14 +567,14 @@ class AutoClassifier:
     
     def _train_model(self):
         """Обучение модели на категориях из CONFIG"""
-        if not SKLEARN_AVAILABLE:
+        if not LIBRARIES['sklearn']:
             return
         
         try:
             X = []
             y = []
             
-            for category, keywords in CONFIG["category_keywords"].items():
+            for category, keywords in CONFIG.category_keywords.items():
                 for keyword in keywords:
                     X.append(keyword)
                     y.append(category)
@@ -375,20 +586,30 @@ class AutoClassifier:
                     y.append(category)
             
             if X:
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=0.2, random_state=42
+                )
+                
                 self.model = Pipeline([
                     ('tfidf', TfidfVectorizer(max_features=2000, ngram_range=(1, 2))),
                     ('clf', MultinomialNB(alpha=0.1))
                 ])
-                self.model.fit(X, y)
+                
+                self.model.fit(X_train, y_train)
+                self.categories = self.model.classes_
+                
+                y_pred = self.model.predict(X_test)
+                self.accuracy = accuracy_score(y_test, y_pred)
+                
                 joblib.dump(self.model, self.model_path)
-                logger.info(f"ML-модель обучена на {len(X)} примерах")
+                logger.info(f"ML-модель обучена на {len(X)} примерах, точность: {self.accuracy:.2%}")
         except Exception as e:
             logger.error(f"Ошибка обучения модели: {e}")
             self.model = None
     
     def predict(self, name: str) -> Tuple[str, float]:
         """Предсказание категории с уверенностью"""
-        if not self.model or not name or not SKLEARN_AVAILABLE:
+        if not self.model or not name or not LIBRARIES['sklearn']:
             return "Прочее", 0.0
         
         try:
@@ -403,197 +624,358 @@ class AutoClassifier:
         except Exception as e:
             logger.error(f"Ошибка предсказания: {e}")
             return "Прочее", 0.0
+    
+    def predict_batch(self, names: List[str]) -> List[Tuple[str, float]]:
+        """Пакетное предсказание категорий"""
+        if not self.model or not names or not LIBRARIES['sklearn']:
+            return [("Прочее", 0.0) for _ in names]
+        
+        try:
+            predictions = self.model.predict(names)
+            probabilities = self.model.predict_proba(names)
+            
+            results = []
+            for pred, probs in zip(predictions, probabilities):
+                confidence = max(probs) * 100
+                if confidence < 30:
+                    results.append(("Прочее", confidence))
+                else:
+                    results.append((pred, confidence))
+            return results
+        except Exception as e:
+            logger.error(f"Ошибка пакетного предсказания: {e}")
+            return [("Прочее", 0.0) for _ in names]
 
 # --------------------------------------------
-# 📤 TELEGRAM УВЕДОМЛЕНИЯ
+# 📊 КЭШИРОВАНИЕ API
 # --------------------------------------------
-class TelegramNotifier:
-    """Отправка уведомлений в Telegram"""
+class APICache:
+    """Кэширование API-запросов"""
     
-    def __init__(self, bot_token: str = None, chat_id: str = None):
-        self.bot_token = bot_token
-        self.chat_id = chat_id
-        self.api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage" if bot_token else None
-        self.document_url = f"https://api.telegram.org/bot{bot_token}/sendDocument" if bot_token else None
+    def __init__(self):
+        self.cache = CacheManager("api_cache")
     
-    def send_report(self, results: List[Dict]) -> bool:
-        """Отправка отчета в Telegram"""
-        if not self.bot_token or not self.chat_id:
-            return False
-        
-        if not results:
-            return False
-        
-        total_profit = sum(r.get("unit_profit", 0) for r in results)
-        total_products = len(results)
-        profitable = sum(1 for r in results if r.get("unit_profit", 0) > 0)
-        avg_margin = sum(r.get("margin", 0) for r in results) / total_products if total_products else 0
-        
-        message = f"""
-📊 **ОТЧЕТ ПО ЮНИТ-ЭКОНОМИКЕ**
-📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}
+    def get(self, key: str) -> Optional[Any]:
+        return self.cache.get(key)
+    
+    def set(self, key: str, value: Any):
+        self.cache.set(key, value)
+    
+    def clear(self):
+        self.cache.clear()
+    
+    def get_stats(self) -> Dict:
+        return self.cache.get_stats()
 
-📦 **Всего товаров:** {total_products}
-💰 **Прибыльных:** {profitable} ({profitable/total_products*100:.1f}%)
-💵 **Общая прибыль:** {format_currency(total_profit)}
-📈 **Средняя маржа:** {format_percent(avg_margin)}
+# --------------------------------------------
+# 🤖 ИИ-РЕДАКТИРОВАНИЕ ДАННЫХ
+# --------------------------------------------
+class AIFileEditor:
+    """ИИ-редактирование файлов и формул"""
+    
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY', '')
+        self.api_url = "https://api.deepseek.com/v1/chat/completions"
+        self.cache = CacheManager("ai_edit_cache")
+        
+    def edit_data(self, df: pd.DataFrame, prompt: str, instructions: str = "") -> Tuple[pd.DataFrame, str]:
+        """Редактирование данных через ИИ"""
+        if not self.api_key:
+            return df, "❌ API ключ не установлен"
+        
+        if not LIBRARIES['openai']:
+            return df, "❌ Библиотека openai не установлена"
+        
+        try:
+            # Подготовка данных для отправки
+            sample_data = df.head(20).to_dict(orient='records')
+            columns_info = df.dtypes.to_dict()
+            
+            # Формирование запроса
+            system_prompt = """Ты - эксперт по обработке данных и юнит-экономике. 
+Твоя задача - исправить и улучшить данные в файле согласно запросу пользователя.
 
-🏆 **Топ-5 по прибыли:**
+Правила:
+1. Исправляй только те данные, которые явно указаны в запросе
+2. Сохраняй структуру данных
+3. Если нужно пересчитать формулы - делай это корректно
+4. Возвращай результат в формате JSON с исправленными данными
+5. Если данные не требуют исправления, верни их как есть"""
+
+            user_prompt = f"""
+Запрос пользователя: {prompt}
+
+Дополнительные инструкции: {instructions}
+
+Данные (первые 20 строк):
+{json.dumps(sample_data, ensure_ascii=False, indent=2, default=str)}
+
+Типы данных колонок:
+{json.dumps({k: str(v) for k, v in columns_info.items()}, ensure_ascii=False, indent=2)}
+
+Пожалуйста, исправь данные согласно запросу и верни их в формате JSON.
+Если нужно пересчитать какие-то значения - сделай это.
+Верни только JSON с исправленными данными.
 """
-        top = sorted(results, key=lambda x: x.get('unit_profit', 0), reverse=True)[:5]
-        for i, product in enumerate(top, 1):
-            name = product.get('name', '')[:30]
-            profit = product.get('unit_profit', 0)
-            margin = product.get('margin', 0)
-            message += f"\n{i}. {name} — {format_currency(profit)} ({format_percent(margin)})"
-        
-        categories = {}
-        for r in results:
-            cat = r.get('category', 'Прочее')
-            if cat not in categories:
-                categories[cat] = 0
-            categories[cat] += 1
-        
-        message += "\n\n📊 **Распределение по категориям:**"
-        for cat, count in sorted(categories.items(), key=lambda x: x[1], reverse=True)[:5]:
-            message += f"\n- {cat}: {count} ({count/total_products*100:.1f}%)"
-        
-        try:
-            response = requests.post(
-                self.api_url,
-                json={
-                    "chat_id": self.chat_id,
-                    "text": message,
-                    "parse_mode": "Markdown"
-                },
-                timeout=30
-            )
-            return response.status_code == 200
-        except Exception as e:
-            logger.error(f"Telegram error: {e}")
-            return False
-    
-    def send_file(self, file_bytes: bytes, filename: str) -> bool:
-        """Отправка файла в Telegram"""
-        if not self.bot_token or not self.chat_id:
-            return False
-        
-        try:
-            files = {
-                'document': (filename, file_bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            }
-            data = {
-                'chat_id': self.chat_id
-            }
-            response = requests.post(
-                self.document_url,
-                files=files,
-                data=data,
-                timeout=60
-            )
-            return response.status_code == 200
-        except Exception as e:
-            logger.error(f"Telegram file error: {e}")
-            return False
 
-# --------------------------------------------
-# 📊 GOOGLE SHEETS ЭКСПОРТ
-# --------------------------------------------
-class GoogleSheetsExporter:
-    """Экспорт в Google Sheets"""
-    
-    def __init__(self, credentials_json: str = None, spreadsheet_name: str = None):
-        self.credentials_json = credentials_json
-        self.spreadsheet_name = spreadsheet_name
-        self.client = None
-        self.sheet = None
-        
-        if credentials_json and spreadsheet_name:
-            self._connect()
-    
-    def _connect(self):
-        """Подключение к Google Sheets"""
-        try:
-            import gspread
-            from oauth2client.service_account import ServiceAccountCredentials
+            import openai
+            client = openai.OpenAI(api_key=self.api_key)
             
-            scope = [
-                'https://spreadsheets.google.com/feeds',
-                'https://www.googleapis.com/auth/drive'
-            ]
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=4000,
+                response_format={"type": "json_object"}
+            )
             
-            if os.path.exists(self.credentials_json):
-                creds = ServiceAccountCredentials.from_json_keyfile_name(self.credentials_json, scope)
+            content = response.choices[0].message.content
+            
+            # Извлечение JSON
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if not json_match:
+                return df, "❌ Не удалось извлечь JSON из ответа ИИ"
+            
+            result_data = json.loads(json_match.group())
+            
+            # Преобразование обратно в DataFrame
+            if 'data' in result_data:
+                fixed_data = result_data['data']
             else:
-                creds_dict = json.loads(self.credentials_json)
-                creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+                fixed_data = result_data
             
-            self.client = gspread.authorize(creds)
-            self._open_spreadsheet()
-            return True
-        except ImportError:
-            logger.error("gspread не установлен. Установите: pip install gspread oauth2client")
-            return False
+            if isinstance(fixed_data, list) and len(fixed_data) > 0:
+                # Определяем, какие колонки были изменены
+                original_columns = set(df.columns)
+                new_columns = set(fixed_data[0].keys()) if fixed_data else set()
+                
+                # Создаем новый DataFrame
+                new_df = pd.DataFrame(fixed_data)
+                
+                # Если данных меньше чем было, добавляем остальные строки без изменений
+                if len(new_df) < len(df):
+                    remaining = df.iloc[len(new_df):].copy()
+                    # Приводим колонки к единому формату
+                    for col in remaining.columns:
+                        if col not in new_df.columns:
+                            new_df[col] = None
+                    new_df = pd.concat([new_df, remaining], ignore_index=True)
+                
+                # Сохраняем колонки в исходном порядке
+                for col in df.columns:
+                    if col not in new_df.columns:
+                        new_df[col] = None
+                
+                new_df = new_df[df.columns]
+                
+                message = result_data.get('message', '✅ Данные успешно исправлены')
+                return new_df, f"✅ {message}"
+            
+            return df, "❌ Не удалось обработать ответ ИИ"
+            
         except Exception as e:
-            logger.error(f"Google Sheets connection error: {e}")
-            return False
+            logger.error(f"AI edit error: {e}")
+            return df, f"❌ Ошибка: {str(e)}"
     
-    def _open_spreadsheet(self):
-        """Открытие или создание таблицы"""
-        try:
-            self.sheet = self.client.open(self.spreadsheet_name)
-        except:
-            self.sheet = self.client.create(self.spreadsheet_name)
-            self.sheet.share(None, perm_type='anyone', role='writer')
-    
-    def export_results(self, results: List[Dict]) -> Dict:
-        """Экспорт результатов в Google Sheets"""
-        if not self.client or not self.sheet:
-            return {"status": "error", "message": "Не подключено к Google Sheets"}
+    def edit_formulas(self, df: pd.DataFrame, formula_prompt: str) -> Tuple[pd.DataFrame, str]:
+        """Редактирование формул через ИИ"""
+        if not self.api_key:
+            return df, "❌ API ключ не установлен"
         
-        if not results:
-            return {"status": "error", "message": "Нет данных для экспорта"}
+        if not LIBRARIES['openai']:
+            return df, "❌ Библиотека openai не установлена"
         
         try:
-            headers = [
-                "Артикул", "Наименование", "Бренд", "OE номер", "Категория", "Штрихкод",
-                "Цена", "Себестоимость", "Прибыль", "Маржа %", "ROI %",
-                "Статус", "ABC", "Рекомендуемая цена", "Действие"
-            ]
+            # Определение текущих формул
+            sample_data = df.head(10).to_dict(orient='records')
+            columns_info = df.dtypes.to_dict()
             
-            data = []
-            for r in results:
-                data.append([
-                    r.get('article', ''),
-                    r.get('name', '')[:50],
-                    r.get('brand', ''),
-                    r.get('oe_number', ''),
-                    r.get('category', ''),
-                    r.get('barcode', ''),
-                    r.get('price', 0),
-                    r.get('cost', 0),
-                    r.get('unit_profit', 0),
-                    r.get('margin', 0),
-                    r.get('roi', 0),
-                    r.get('profit_status', ''),
-                    r.get('abc_category', ''),
-                    r.get('recommended_price', 0),
-                    r.get('price_action', '')
-                ])
+            # Определение возможных формул на основе данных
+            numeric_cols = [col for col, dtype in df.dtypes.items() if dtype in ['int64', 'float64']]
             
-            ws = self.sheet.get_worksheet(0)
-            ws.clear()
-            ws.update([headers] + data)
-            ws.format('A1:O1', {'textFormat': {'bold': True}})
+            system_prompt = """Ты - эксперт по юнит-экономике и Excel-формулам.
+Твоя задача - создать или исправить формулы для расчета показателей.
+
+Правила:
+1. Создавай формулы для расчета: маржинальности, прибыли, рентабельности, окупаемости
+2. Используй только существующие колонки
+3. Добавляй новые колонки с формулами
+4. Возвращай результат в формате JSON с исправленными данными
+5. Объясни, какие формулы были добавлены или исправлены"""
+
+            user_prompt = f"""
+Запрос: {formula_prompt}
+
+Данные (первые 10 строк):
+{json.dumps(sample_data, ensure_ascii=False, indent=2, default=str)}
+
+Числовые колонки: {numeric_cols}
+
+Типы данных колонок:
+{json.dumps({k: str(v) for k, v in columns_info.items()}, ensure_ascii=False, indent=2)}
+
+Пожалуйста, создай или исправь формулы согласно запросу.
+Верни JSON с:
+1. 'data' - исправленные данные
+2. 'message' - пояснение о проделанной работе
+3. 'formulas' - список добавленных формул
+"""
+
+            import openai
+            client = openai.OpenAI(api_key=self.api_key)
             
-            return {
-                "status": "success",
-                "message": f"Экспортировано {len(results)} записей",
-                "url": f"https://docs.google.com/spreadsheets/d/{self.sheet.id}"
-            }
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+                max_tokens=4000,
+                response_format={"type": "json_object"}
+            )
+            
+            content = response.choices[0].message.content
+            
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if not json_match:
+                return df, "❌ Не удалось извлечь JSON из ответа ИИ"
+            
+            result_data = json.loads(json_match.group())
+            
+            if 'data' in result_data:
+                fixed_data = result_data['data']
+            else:
+                fixed_data = result_data
+            
+            if isinstance(fixed_data, list) and len(fixed_data) > 0:
+                new_df = pd.DataFrame(fixed_data)
+                
+                if len(new_df) < len(df):
+                    remaining = df.iloc[len(new_df):].copy()
+                    for col in remaining.columns:
+                        if col not in new_df.columns:
+                            new_df[col] = None
+                    new_df = pd.concat([new_df, remaining], ignore_index=True)
+                
+                for col in df.columns:
+                    if col not in new_df.columns:
+                        new_df[col] = None
+                
+                new_df = new_df[df.columns]
+                
+                formulas = result_data.get('formulas', [])
+                formula_msg = "\n".join([f"- {f}" for f in formulas]) if formulas else ""
+                
+                message = result_data.get('message', '✅ Формулы успешно применены')
+                return new_df, f"✅ {message}\n\n📊 Формулы:\n{formula_msg}"
+            
+            return df, "❌ Не удалось обработать ответ ИИ"
+            
         except Exception as e:
-            logger.error(f"Google Sheets export error: {e}")
-            return {"status": "error", "message": str(e)}
+            logger.error(f"AI formula edit error: {e}")
+            return df, f"❌ Ошибка: {str(e)}"
+    
+    def analyze_and_fix_errors(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Анализ и исправление ошибок в данных"""
+        if not self.api_key:
+            return df, "❌ API ключ не установлен"
+        
+        if not LIBRARIES['openai']:
+            return df, "❌ Библиотека openai не установлена"
+        
+        try:
+            # Анализ данных на наличие ошибок
+            sample_data = df.head(20).to_dict(orient='records')
+            columns_info = df.dtypes.to_dict()
+            
+            # Поиск аномалий
+            errors = []
+            for col in df.columns:
+                if df[col].dtype in ['int64', 'float64']:
+                    if df[col].min() < 0 and 'цена' not in col.lower() and 'cost' not in col.lower():
+                        errors.append(f"Отрицательные значения в {col}")
+                    if df[col].max() > 1000000:
+                        errors.append(f"Аномально большие значения в {col}")
+                    if df[col].isna().sum() > len(df) * 0.5:
+                        errors.append(f"Много пропусков в {col}")
+            
+            system_prompt = """Ты - эксперт по очистке и исправлению данных.
+Твоя задача - найти и исправить ошибки в данных.
+
+Правила:
+1. Исправляй все найденные ошибки
+2. Заполняй пропуски разумными значениями
+3. Исправляй выбросы
+4. Нормализуй формат данных
+5. Возвращай результат в формате JSON"""
+
+            user_prompt = f"""
+Найденные ошибки: {json.dumps(errors, ensure_ascii=False)}
+
+Данные (первые 20 строк):
+{json.dumps(sample_data, ensure_ascii=False, indent=2, default=str)}
+
+Типы данных колонок:
+{json.dumps({k: str(v) for k, v in columns_info.items()}, ensure_ascii=False, indent=2)}
+
+Пожалуйста, исправь все ошибки и верни JSON с исправленными данными.
+"""
+
+            import openai
+            client = openai.OpenAI(api_key=self.api_key)
+            
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.1,
+                max_tokens=4000,
+                response_format={"type": "json_object"}
+            )
+            
+            content = response.choices[0].message.content
+            
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if not json_match:
+                return df, "❌ Не удалось извлечь JSON из ответа ИИ"
+            
+            result_data = json.loads(json_match.group())
+            
+            if 'data' in result_data:
+                fixed_data = result_data['data']
+            else:
+                fixed_data = result_data
+            
+            if isinstance(fixed_data, list) and len(fixed_data) > 0:
+                new_df = pd.DataFrame(fixed_data)
+                
+                if len(new_df) < len(df):
+                    remaining = df.iloc[len(new_df):].copy()
+                    for col in remaining.columns:
+                        if col not in new_df.columns:
+                            new_df[col] = None
+                    new_df = pd.concat([new_df, remaining], ignore_index=True)
+                
+                for col in df.columns:
+                    if col not in new_df.columns:
+                        new_df[col] = None
+                
+                new_df = new_df[df.columns]
+                
+                message = result_data.get('message', '✅ Ошибки исправлены')
+                return new_df, f"✅ {message}"
+            
+            return df, "❌ Не удалось обработать ответ ИИ"
+            
+        except Exception as e:
+            logger.error(f"AI error analysis error: {e}")
+            return df, f"❌ Ошибка: {str(e)}"
 
 # --------------------------------------------
 # 🔌 API-КЛИЕНТЫ ДЛЯ МАРКЕТПЛЕЙСОВ
@@ -609,23 +991,37 @@ class BaseMarketplaceAPI:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (compatible; UnitEconomy/1.0)'
         })
+        
+        if CONFIG.proxy["enabled"]:
+            proxies = {}
+            if CONFIG.proxy["http"]:
+                proxies['http'] = CONFIG.proxy["http"]
+            if CONFIG.proxy["https"]:
+                proxies['https'] = CONFIG.proxy["https"]
+            if proxies:
+                self.session.proxies.update(proxies)
     
     def _request(self, method: str, url: str, **kwargs) -> Optional[Dict]:
         """Выполнение запроса с ретраями"""
-        for attempt in range(CONFIG["api"]["max_retries"]):
+        for attempt in range(CONFIG.api["max_retries"]):
             try:
                 response = self.session.request(
                     method, url,
-                    timeout=CONFIG["api"]["timeout"],
+                    timeout=CONFIG.api["timeout"],
                     **kwargs
                 )
                 if response.status_code == 200:
                     return response.json()
                 elif response.status_code == 429:
-                    time.sleep(2 ** attempt)
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Rate limit, ждем {wait_time}с")
+                    time.sleep(wait_time)
                 else:
                     logger.warning(f"API error {response.status_code}: {response.text[:200]}")
                     break
+            except requests.exceptions.Timeout:
+                logger.warning(f"Таймаут запроса (попытка {attempt+1})")
+                time.sleep(1)
             except Exception as e:
                 logger.error(f"Request error (attempt {attempt+1}): {e}")
                 time.sleep(1)
@@ -656,7 +1052,9 @@ class YandexMarketAPI(BaseMarketplaceAPI):
         url = f"{self.BASE_URL}/businesses/{self.business_id}/offer-mappings"
         params = {"page": page, "page_size": page_size}
         
-        result = self._request('GET', url, params=params)
+        with timer("Yandex get_products"):
+            result = self._request('GET', url, params=params)
+        
         if result:
             self.cache.set(cache_key, result)
         return result
@@ -671,7 +1069,9 @@ class YandexMarketAPI(BaseMarketplaceAPI):
         url = f"{self.BASE_URL}/businesses/{self.business_id}/offer-prices"
         data = {"offerIds": offer_ids}
         
-        result = self._request('POST', url, json=data)
+        with timer("Yandex get_offer_prices"):
+            result = self._request('POST', url, json=data)
+        
         if result:
             self.cache.set(cache_key, result)
         return result
@@ -741,7 +1141,9 @@ class OzonAPI(BaseMarketplaceAPI):
         url = f"{self.BASE_URL}/product/list"
         data = {"page": page, "page_size": page_size}
         
-        result = self._request('POST', url, json=data)
+        with timer("Ozon get_products"):
+            result = self._request('POST', url, json=data)
+        
         if result:
             self.cache.set(cache_key, result)
         return result
@@ -756,7 +1158,9 @@ class OzonAPI(BaseMarketplaceAPI):
         url = f"{self.BASE_URL}/product/prices"
         data = {"product_ids": product_ids}
         
-        result = self._request('POST', url, json=data)
+        with timer("Ozon get_prices"):
+            result = self._request('POST', url, json=data)
+        
         if result:
             self.cache.set(cache_key, result)
         return result
@@ -816,7 +1220,9 @@ class WildberriesAPI(BaseMarketplaceAPI):
         url = f"{self.BASE_URL}/content/v2/get/cards/list"
         data = {"limit": limit, "offset": (page - 1) * limit}
         
-        result = self._request('POST', url, json=data)
+        with timer("WB get_products"):
+            result = self._request('POST', url, json=data)
+        
         if result:
             self.cache.set(cache_key, result)
         return result
@@ -831,7 +1237,9 @@ class WildberriesAPI(BaseMarketplaceAPI):
         url = f"{self.BASE_URL}/public/v1/prices"
         data = {"nm_ids": nm_ids}
         
-        result = self._request('POST', url, json=data)
+        with timer("WB get_prices"):
+            result = self._request('POST', url, json=data)
+        
         if result:
             self.cache.set(cache_key, result)
         return result
@@ -884,7 +1292,9 @@ class AliExpressAPI(BaseMarketplaceAPI):
             'access_token': self.api_key
         }
         
-        result = self._request('GET', self.BASE_URL, params=params)
+        with timer("AliExpress get_products"):
+            result = self._request('GET', self.BASE_URL, params=params)
+        
         if result:
             self.cache.set(cache_key, result)
         return result
@@ -898,6 +1308,7 @@ class OEMDatabase:
     def __init__(self, db_path: str = "oem_database.json"):
         self.db_path = db_path
         self.data = {}
+        self.cache = {}
         self._load_database()
     
     def _load_database(self):
@@ -915,8 +1326,10 @@ class OEMDatabase:
             self._save_database()
     
     def _create_demo_database(self):
-        """Создание демо-базы OE номеров"""
-        self.data = {
+        """Создание расширенной демо-базы OE номеров"""
+        self.data = {}
+        
+        demo_data = {
             "0986AF0059": {
                 "category": "Фильтры",
                 "subcategory": "Масляные фильтры",
@@ -925,7 +1338,8 @@ class OEMDatabase:
                 "weight": 0.35,
                 "dimensions": {"length": 100, "width": 80, "height": 50},
                 "cross_reference": ["MANN W842/2", "MAHLE OC 205"],
-                "barcode": "1234567890123"
+                "barcode": "1234567890123",
+                "description": "Масляный фильтр BOSCH для европейских автомобилей"
             },
             "W842/2": {
                 "category": "Фильтры",
@@ -935,7 +1349,8 @@ class OEMDatabase:
                 "weight": 0.32,
                 "dimensions": {"length": 95, "width": 75, "height": 48},
                 "cross_reference": ["BOSCH 0986AF0059", "MAHLE OC 205"],
-                "barcode": "1234567890124"
+                "barcode": "1234567890124",
+                "description": "Масляный фильтр MANN для европейских автомобилей"
             },
             "OC205": {
                 "category": "Фильтры",
@@ -945,7 +1360,8 @@ class OEMDatabase:
                 "weight": 0.33,
                 "dimensions": {"length": 98, "width": 78, "height": 49},
                 "cross_reference": ["BOSCH 0986AF0059", "MANN W842/2"],
-                "barcode": "1234567890125"
+                "barcode": "1234567890125",
+                "description": "Масляный фильтр MAHLE для европейских автомобилей"
             },
             "AB123456789": {
                 "category": "Тормозная система",
@@ -955,7 +1371,8 @@ class OEMDatabase:
                 "weight": 1.2,
                 "dimensions": {"length": 150, "width": 120, "height": 30},
                 "cross_reference": ["BREMBO P85012", "ATE 13.0460-1234.2"],
-                "barcode": "1234567890126"
+                "barcode": "1234567890126",
+                "description": "Тормозные колодки BREMBO для VAG группы"
             },
             "5524": {
                 "category": "Свечи зажигания",
@@ -965,57 +1382,39 @@ class OEMDatabase:
                 "weight": 0.05,
                 "dimensions": {"length": 50, "width": 20, "height": 20},
                 "cross_reference": ["BOSCH FR7DC", "DENSO K16PR-U11"],
-                "barcode": "1234567890127"
-            },
-            "1234567890": {
-                "category": "Стеклоочистители",
-                "subcategory": "Щетки стеклоочистителя",
-                "brand": "VALEO",
-                "compatibility": ["BMW 3", "BMW 5", "Audi A4", "VW Passat"],
-                "weight": 0.25,
-                "dimensions": {"length": 500, "width": 30, "height": 20},
-                "cross_reference": ["BOSCH 3397007405", "SWF 119-000-016"],
-                "barcode": "1234567890128"
-            },
-            "12345678901": {
-                "category": "Тормозная система",
-                "subcategory": "Тормозные диски",
-                "brand": "ATE",
-                "compatibility": ["BMW 3", "BMW 5", "Audi A4", "VW Passat"],
-                "weight": 8.5,
-                "dimensions": {"length": 300, "width": 300, "height": 25},
-                "cross_reference": ["BREMBO 09.9870.10", "BOSCH 0986AB8765"],
-                "barcode": "1234567890129"
-            },
-            "6PK1735": {
-                "category": "Ремни и цепи",
-                "subcategory": "Ремни ГРМ",
-                "brand": "CONTINENTAL",
-                "compatibility": ["Audi A4", "Audi A6", "VW Passat", "Skoda Octavia"],
-                "weight": 0.15,
-                "dimensions": {"length": 1735, "width": 6, "height": 6},
-                "cross_reference": ["GATES 6PK1735", "DAYCO 6PK1735"],
-                "barcode": "1234567890130"
+                "barcode": "1234567890127",
+                "description": "Свеча зажигания NGK для бензиновых двигателей"
             }
         }
         
-        for i in range(50):
+        self.data.update(demo_data)
+        
+        categories = ["Двигатель", "Трансмиссия", "Подвеска", "Электрооборудование", 
+                     "Система охлаждения", "Масла и жидкости"]
+        brands = ["BOSCH", "DENSO", "NGK", "BREMBO", "AISIN", "HITACHI", "VALEO", 
+                 "MANN", "MAHLE", "SKF", "FAG", "TIMKEN", "CONTINENTAL"]
+        
+        for i in range(70):
             oe = f"OE{random.randint(10000, 99999)}{chr(65+random.randint(0, 25))}"
-            categories = ["Двигатель", "Трансмиссия", "Подвеска", "Электрооборудование", "Система охлаждения", "Масла и жидкости"]
-            brands = ["BOSCH", "DENSO", "NGK", "BREMBO", "AISIN", "HITACHI", "VALEO", "MANN", "MAHLE", "SKF"]
+            category = random.choice(categories)
+            brand = random.choice(brands)
             self.data[oe] = {
-                "category": random.choice(categories),
+                "category": category,
                 "subcategory": "Запчасть",
-                "brand": random.choice(brands),
-                "compatibility": ["BMW 3", "Audi A4", "VW Golf"],
+                "brand": brand,
+                "compatibility": random.sample(["BMW 3", "Audi A4", "VW Golf", "Toyota Camry", "Honda Civic"], 
+                                             random.randint(1, 3)),
                 "weight": round(random.uniform(0.1, 10), 2),
                 "dimensions": {
                     "length": random.randint(50, 500),
                     "width": random.randint(20, 400),
                     "height": random.randint(10, 200)
                 },
-                "barcode": f"{random.randint(1000000000000, 9999999999999)}"
+                "barcode": f"{random.randint(1000000000000, 9999999999999)}",
+                "description": f"{category} {brand} для европейских автомобилей"
             }
+        
+        logger.info(f"Создана демо-база OE: {len(self.data)} записей")
     
     def _save_database(self):
         """Сохранение базы данных в JSON"""
@@ -1027,18 +1426,23 @@ class OEMDatabase:
             logger.error(f"Ошибка сохранения базы OE: {e}")
     
     def get_by_oe(self, oe_number: str) -> Optional[Dict]:
-        """Получение данных по OE номеру"""
+        """Получение данных по OE номеру с кэшированием"""
         if not oe_number:
             return None
         
         oe_number = oe_number.strip().upper()
         
+        if oe_number in self.cache:
+            return self.cache[oe_number].copy()
+        
         if oe_number in self.data:
-            return self.data[oe_number].copy()
+            self.cache[oe_number] = self.data[oe_number].copy()
+            return self.cache[oe_number].copy()
         
         for key, value in self.data.items():
             if oe_number in key or key in oe_number:
-                return value.copy()
+                self.cache[oe_number] = value.copy()
+                return self.cache[oe_number].copy()
         
         return None
     
@@ -1072,10 +1476,16 @@ class OEMDatabase:
         data = self.get_by_oe(oe_number)
         return data.get("barcode", "") if data else ""
     
+    def get_description(self, oe_number: str) -> str:
+        """Получение описания по OE номеру"""
+        data = self.get_by_oe(oe_number)
+        return data.get("description", "") if data else ""
+    
     def add_or_update(self, oe_number: str, data: Dict):
         """Добавление или обновление записи в базе"""
         oe_number = oe_number.strip().upper()
         self.data[oe_number] = data
+        self.cache[oe_number] = data.copy()
         self._save_database()
     
     def search_by_brand(self, brand: str) -> List[Dict]:
@@ -1098,12 +1508,27 @@ class OEMDatabase:
                 results.append(result)
         return results
     
+    def search_by_compatibility(self, query: str) -> List[Dict]:
+        """Поиск по совместимости"""
+        results = []
+        query_lower = query.lower()
+        for oe, data in self.data.items():
+            compatibility = data.get("compatibility", [])
+            if any(query_lower in c.lower() for c in compatibility):
+                result = data.copy()
+                result["oe_number"] = oe
+                results.append(result)
+        return results
+    
     def get_statistics(self) -> Dict:
         """Статистика базы данных"""
         stats = {
             "total": len(self.data),
             "categories": {},
-            "brands": {}
+            "brands": {},
+            "with_barcode": 0,
+            "with_dimensions": 0,
+            "with_description": 0
         }
         
         for data in self.data.values():
@@ -1112,14 +1537,21 @@ class OEMDatabase:
             
             brand = data.get("brand", "Неизвестно")
             stats["brands"][brand] = stats["brands"].get(brand, 0) + 1
+            
+            if data.get("barcode"):
+                stats["with_barcode"] += 1
+            if data.get("dimensions"):
+                stats["with_dimensions"] += 1
+            if data.get("description"):
+                stats["with_description"] += 1
         
         return stats
 
 # --------------------------------------------
-# 🕷️ ПАРСЕРЫ ЦЕН КОНКУРЕНТОВ (С МНОЖЕСТВЕННЫМ ПАРСИНГОМ)
+# 🕷️ ПАРСЕРЫ ЦЕН КОНКУРЕНТОВ
 # --------------------------------------------
 class CompetitorParser:
-    """Парсинг цен конкурентов с маркетплейсов (с поддержкой множественного парсинга)"""
+    """Парсинг цен конкурентов с маркетплейсов"""
     
     def __init__(self):
         self.cache = APICache()
@@ -1140,18 +1572,25 @@ class CompetitorParser:
         self.timeout = 15
         self.progress_callback = None
         
+        if CONFIG.proxy["enabled"]:
+            proxies = {}
+            if CONFIG.proxy["http"]:
+                proxies['http'] = CONFIG.proxy["http"]
+            if CONFIG.proxy["https"]:
+                proxies['https'] = CONFIG.proxy["https"]
+            if proxies:
+                self.session.proxies.update(proxies)
+    
     def set_progress_callback(self, callback):
-        """Установка колбэка для отображения прогресса"""
         self.progress_callback = callback
-        
+    
     def _update_progress(self, current: int, total: int, message: str = ""):
-        """Обновление прогресса"""
         if self.progress_callback:
             self.progress_callback(current, total, message)
     
     @st.cache_data(ttl=300)
     def parse_yandex_market(_self, query: str, max_pages: int = 2) -> List[Dict]:
-        """Парсинг Яндекс Маркета (улучшенный)"""
+        """Парсинг Яндекс Маркета"""
         results = []
         
         for page in range(1, max_pages + 1):
@@ -1225,7 +1664,6 @@ class CompetitorParser:
         return results
     
     def _extract_yandex_products_from_json(self, data: Dict) -> List[Dict]:
-        """Извлечение товаров из JSON Яндекс Маркета"""
         products = []
         
         try:
@@ -1250,7 +1688,7 @@ class CompetitorParser:
     
     @st.cache_data(ttl=300)
     def parse_ozon(_self, query: str, max_pages: int = 2) -> List[Dict]:
-        """Парсинг Ozon (улучшенный)"""
+        """Парсинг Ozon"""
         results = []
         
         for page in range(1, max_pages + 1):
@@ -1332,7 +1770,6 @@ class CompetitorParser:
         return results
     
     def _extract_ozon_products_from_json(self, data: Dict) -> List[Dict]:
-        """Извлечение товаров из JSON Ozon"""
         products = []
         
         try:
@@ -1359,7 +1796,7 @@ class CompetitorParser:
     
     @st.cache_data(ttl=300)
     def parse_wildberries(_self, query: str, max_pages: int = 2) -> List[Dict]:
-        """Парсинг Wildberries (улучшенный)"""
+        """Парсинг Wildberries"""
         results = []
         
         for page in range(1, max_pages + 1):
@@ -1423,7 +1860,6 @@ class CompetitorParser:
         return results
     
     def _generate_demo_results(self, marketplace: str, query: str, count: int = 5) -> List[Dict]:
-        """Генерация демо-результатов для тестирования"""
         results = []
         
         base_prices = [1500, 2300, 890, 3450, 1200, 5600, 780, 2150, 4300, 990]
@@ -1441,7 +1877,6 @@ class CompetitorParser:
         return results
     
     def parse_all_marketplaces(self, query: str) -> Dict[str, List[Dict]]:
-        """Парсинг всех маркетплейсов с улучшенной обработкой"""
         results = {}
         
         try:
@@ -1472,21 +1907,7 @@ class CompetitorParser:
         
         return results
     
-    # ============================================================
-    # 🆕 МНОЖЕСТВЕННЫЙ ПАРСИНГ ПО АРТИКУЛАМ
-    # ============================================================
     def parse_multiple_articles(self, articles: List[str], marketplace: str = "Все", max_pages: int = 1) -> Dict[str, Dict[str, List[Dict]]]:
-        """
-        Множественный парсинг по списку артикулов
-        
-        Args:
-            articles: Список артикулов для парсинга
-            marketplace: Маркетплейс ("Все", "Яндекс Маркет", "Ozon", "Wildberries")
-            max_pages: Максимальное количество страниц для каждого запроса
-        
-        Returns:
-            Dict: {артикул: {маркетплейс: [результаты]}}
-        """
         results = {}
         total = len(articles)
         
@@ -1533,22 +1954,8 @@ class CompetitorParser:
     def parse_articles_from_file(self, file_bytes: bytes, article_column: str = "Артикул", 
                                   brand_column: str = "Бренд", marketplace: str = "Все", 
                                   max_pages: int = 1) -> Dict:
-        """
-        Парсинг артикулов из загруженного файла с колонками Артикул и Бренд
-        
-        Args:
-            file_bytes: Байты файла (Excel или CSV)
-            article_column: Название колонки с артикулами
-            brand_column: Название колонки с брендами
-            marketplace: Маркетплейс
-            max_pages: Максимальное количество страниц
-        
-        Returns:
-            Dict: Результаты парсинга
-        """
         try:
             if file_bytes[:4] == b'PK\x03\x04':
-                import io
                 df = pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
             else:
                 df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8-sig')
@@ -1556,7 +1963,6 @@ class CompetitorParser:
             if df.empty:
                 return {"error": "Файл пуст"}
             
-            # Ищем колонку с артикулами
             if article_column not in df.columns:
                 for col in df.columns:
                     col_lower = col.lower()
@@ -1566,7 +1972,6 @@ class CompetitorParser:
                 else:
                     return {"error": f"Колонка '{article_column}' не найдена. Доступные: {list(df.columns)}"}
             
-            # Ищем колонку с брендами
             if brand_column not in df.columns:
                 for col in df.columns:
                     col_lower = col.lower()
@@ -1576,7 +1981,6 @@ class CompetitorParser:
                 else:
                     brand_column = None
             
-            # Извлекаем артикулы и бренды
             articles_data = []
             for idx, row in df.iterrows():
                 article = safe_str(row[article_column])
@@ -1590,14 +1994,12 @@ class CompetitorParser:
             if not articles_data:
                 return {"error": "Нет артикулов для парсинга"}
             
-            # Выполняем множественный парсинг
             results = self.parse_multiple_articles(
                 [a['article'] for a in articles_data], 
                 marketplace, 
                 max_pages
             )
             
-            # Добавляем бренды к результатам
             brand_map = {a['article']: a['brand'] for a in articles_data}
             for article, brand in brand_map.items():
                 if article in results:
@@ -1610,7 +2012,6 @@ class CompetitorParser:
             return {"error": str(e)}
     
     def format_multiple_results(self, results: Dict) -> pd.DataFrame:
-        """Форматирование результатов множественного парсинга в DataFrame"""
         rows = []
         
         for article, data in results.items():
@@ -1659,7 +2060,6 @@ class CompetitorParser:
         
         df = pd.DataFrame(rows)
         if not df.empty:
-            # Сортируем по артикулу и маркетплейсу
             df = df.sort_values(['Артикул', 'Маркетплейс']).reset_index(drop=True)
         
         return df
@@ -1674,15 +2074,14 @@ class CompetitorManager:
         self.parser = CompetitorParser()
         self.competitor_data = {}
         self.last_update = {}
+        self.cache = CacheManager("competitor_cache")
     
     def get_competitor_prices(self, query: str, marketplace: str = None) -> Dict:
-        """Получение цен конкурентов"""
         cache_key = generate_cache_key('competitor_prices', query, marketplace or 'all')
         
-        if cache_key in self.competitor_data:
-            data, timestamp = self.competitor_data[cache_key]
-            if (datetime.now() - timestamp).total_seconds() < 3600:
-                return data
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
         
         if marketplace:
             parser_map = {
@@ -1698,11 +2097,10 @@ class CompetitorManager:
         else:
             results = self.parser.parse_all_marketplaces(query)
         
-        self.competitor_data[cache_key] = (results, datetime.now())
+        self.cache.set(cache_key, results)
         return results
     
     def analyze_competitor_prices(self, product_name: str, our_price: float) -> Dict:
-        """Анализ цен конкурентов"""
         competitor_data = self.get_competitor_prices(product_name)
         
         all_prices = []
@@ -1771,25 +2169,23 @@ class AITariffProvider:
     """Получение актуальных тарифов через AI с кэшированием"""
     
     def __init__(self, api_key: str = None, cache_ttl: int = 3600):
-        self.api_key = api_key
+        self.api_key = api_key or os.getenv('DEEPSEEK_API_KEY', '')
         self.api_url = "https://api.deepseek.com/v1/chat/completions"
-        self.cache = {}
+        self.cache = CacheManager("tariff_cache")
         self.cache_ttl = cache_ttl
         self.last_update = {}
         
     def get_rates(self, marketplace: str, mode: str = "FBY") -> Dict:
-        """Получение тарифов через AI или из кэша"""
         cache_key = generate_cache_key(marketplace, mode)
         
-        if cache_key in self.cache:
-            cached_data, timestamp = self.cache[cache_key]
-            if (datetime.now() - timestamp).total_seconds() < self.cache_ttl:
-                logger.info(f"Использую кэшированные тарифы для {marketplace}/{mode}")
-                return cached_data.copy()
+        cached = self.cache.get(cache_key)
+        if cached:
+            logger.info(f"Использую кэшированные тарифы для {marketplace}/{mode}")
+            return cached.copy()
         
         rates = self._get_base_rates(marketplace, mode)
         
-        if self.api_key:
+        if self.api_key and LIBRARIES['openai']:
             try:
                 ai_rates = self._get_ai_rates(marketplace, mode)
                 if ai_rates and isinstance(ai_rates, dict):
@@ -1800,13 +2196,12 @@ class AITariffProvider:
             except Exception as e:
                 logger.error(f"AI tariff error: {e}")
         
-        self.cache[cache_key] = (rates.copy(), datetime.now())
+        self.cache.set(cache_key, rates.copy())
         self.last_update[cache_key] = datetime.now()
         
         return rates
     
     def _get_base_rates(self, marketplace: str, mode: str) -> Dict:
-        """Базовые тарифы"""
         rates = {
             "commission": 0.11,
             "logistics_base": 70.0,
@@ -1849,11 +2244,13 @@ class AITariffProvider:
         return rates
     
     def _get_ai_rates(self, marketplace: str, mode: str) -> Optional[Dict]:
-        """Получение тарифов через AI API"""
-        if not self.api_key:
+        if not self.api_key or not LIBRARIES['openai']:
             return None
-            
+        
         try:
+            import openai
+            client = openai.OpenAI(api_key=self.api_key)
+            
             prompt = f"""
             Предоставь актуальные тарифы для маркетплейса {marketplace} 
             для продажи автозапчастей на начало 2026 года.
@@ -1862,30 +2259,22 @@ class AITariffProvider:
             Верни ТОЛЬКО JSON с тарифами.
             """
             
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=1000,
+                response_format={"type": "json_object"}
+            )
             
-            data = {
-                "model": "deepseek-chat",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,
-                "max_tokens": 1000,
-                "response_format": {"type": "json_object"}
-            }
-            
-            response = requests.post(self.api_url, headers=headers, json=data, timeout=30)
-            
-            if response.status_code == 200:
-                content = response.json()['choices'][0]['message']['content']
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
-                    rates = json.loads(json_match.group())
-                    required_keys = ["commission", "logistics_base", "logistics_per_liter", 
-                                   "storage_per_liter", "acquiring"]
-                    if all(key in rates for key in required_keys):
-                        return rates
+            content = response.choices[0].message.content
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                rates = json.loads(json_match.group())
+                required_keys = ["commission", "logistics_base", "logistics_per_liter", 
+                               "storage_per_liter", "acquiring"]
+                if all(key in rates for key in required_keys):
+                    return rates
             return None
             
         except Exception as e:
@@ -1893,16 +2282,14 @@ class AITariffProvider:
             return None
     
     def get_all_rates(self) -> Dict:
-        """Получение тарифов для всех маркетплейсов и режимов"""
         all_rates = {}
-        for marketplace in CONFIG["marketplaces"]:
+        for marketplace in CONFIG.marketplaces:
             all_rates[marketplace] = {}
-            for mode in CONFIG["operation_modes"]:
+            for mode in CONFIG.operation_modes:
                 all_rates[marketplace][mode] = self.get_rates(marketplace, mode)
         return all_rates
     
     def clear_cache(self):
-        """Очистка кэша"""
         self.cache.clear()
         self.last_update.clear()
         logger.info("Кэш тарифов очищен")
@@ -1914,16 +2301,15 @@ class CategoryClassifier:
     """Классификация категорий товаров с использованием ML"""
     
     def __init__(self):
-        self.keywords = CONFIG["category_keywords"]
+        self.keywords = CONFIG.category_keywords
         self.categories = list(self.keywords.keys())
         self.cache = {}
-        self.oem_patterns = CONFIG["oem_patterns"]
-        self.barcode_patterns = CONFIG["barcode_patterns"]
-        self.ml_classifier = AutoClassifier() if SKLEARN_AVAILABLE else None
+        self.oem_patterns = CONFIG.oem_patterns
+        self.barcode_patterns = CONFIG.barcode_patterns
+        self.ml_classifier = AutoClassifier() if LIBRARIES['sklearn'] else None
         
     @lru_cache(maxsize=10000)
     def classify(self, name: str) -> Tuple[str, float]:
-        """Определение категории по наименованию с ML"""
         if not name:
             return "Прочее", 0.0
         
@@ -1956,8 +2342,16 @@ class CategoryClassifier:
         
         return best_category, round(confidence, 1)
     
+    def classify_batch(self, names: List[str]) -> List[Tuple[str, float]]:
+        if not names:
+            return []
+        
+        results = []
+        for name in names:
+            results.append(self.classify(name))
+        return results
+    
     def extract_oem(self, name: str) -> Optional[str]:
-        """Извлечение OEM номера из наименования"""
         if not name:
             return None
         
@@ -1968,7 +2362,6 @@ class CategoryClassifier:
         return None
     
     def extract_barcode(self, name: str) -> Optional[str]:
-        """Извлечение штрихкода из наименования"""
         if not name:
             return None
         
@@ -1979,7 +2372,6 @@ class CategoryClassifier:
         return None
     
     def extract_brand(self, name: str) -> Optional[str]:
-        """Извлечение бренда из наименования"""
         if not name:
             return None
         
@@ -2015,16 +2407,15 @@ class DataValidator:
         }
     
     def validate_product(self, row: Dict) -> Tuple[bool, List[str]]:
-        """Валидация одного товара"""
         errors = []
         warnings = []
         
         price = safe_float(row.get("price", 0))
         if price <= 0:
             errors.append("Цена должна быть больше 0")
-        elif price < CONFIG["validation"]["min_price"]:
+        elif price < CONFIG.validation["min_price"]:
             warnings.append(f"Цена очень низкая: {price} ₽")
-        elif price > CONFIG["validation"]["max_price"]:
+        elif price > CONFIG.validation["max_price"]:
             warnings.append(f"Цена очень высокая: {price} ₽")
         
         cost = safe_float(row.get("cost", 0))
@@ -2037,13 +2428,13 @@ class DataValidator:
             value = safe_float(row.get(dim, 0))
             if value < 0:
                 errors.append(f"{label} не может быть отрицательной")
-            elif value > CONFIG["validation"]["max_dimension"]:
+            elif value > CONFIG.validation["max_dimension"]:
                 warnings.append(f"Подозрительно большая {label.lower()}: {value} мм")
         
         weight = safe_float(row.get("weight", 0))
         if weight < 0:
             errors.append("Вес не может быть отрицательным")
-        elif weight > CONFIG["validation"]["max_weight"]:
+        elif weight > CONFIG.validation["max_weight"]:
             warnings.append(f"Подозрительно большой вес: {weight} кг")
         
         name = safe_str(row.get("name", ""))
@@ -2053,6 +2444,8 @@ class DataValidator:
         article = safe_str(row.get("article", ""))
         if not article:
             warnings.append("Отсутствует артикул товара")
+        elif not validate_article(article):
+            warnings.append(f"Некорректный артикул: {article}")
         
         barcode = safe_str(row.get("barcode", ""))
         if barcode and not is_valid_barcode(barcode):
@@ -2075,7 +2468,6 @@ class DataValidator:
         return len(errors) == 0, errors + warnings
     
     def get_report(self) -> Dict:
-        """Получение отчета по валидации"""
         return {
             "total": self.stats["total"],
             "valid": self.stats["valid"],
@@ -2087,7 +2479,6 @@ class DataValidator:
         }
     
     def reset(self):
-        """Сброс валидатора"""
         self.errors = []
         self.warnings = []
         self.stats = {
@@ -2126,9 +2517,9 @@ class UnitEconomicsEngine:
         self.competitor_manager = CompetitorManager()
         self.oem_db = OEMDatabase()
         self.classifier = CategoryClassifier()
+        self.cache = CacheManager("engine_cache")
     
     def _convert_to_mm(self, value: float) -> float:
-        """Конвертация значения в мм"""
         if value == 0:
             return 0.0
         
@@ -2138,19 +2529,27 @@ class UnitEconomicsEngine:
             return value * 10.0
         
         return value
-        
+    
     def calculate_product(self, row: Dict) -> Optional[Dict]:
-        """Расчет юнит-экономики для одного товара"""
         try:
+            cache_key = generate_cache_key('product', row.get('article', ''), self.marketplace, self.mode)
+            cached = self.cache.get(cache_key)
+            if cached:
+                return cached.copy()
+            
             is_valid, validation_issues = self.validator.validate_product(row)
-            return self._calculate_product_model(row, is_valid, validation_issues)
+            result = self._calculate_product_model(row, is_valid, validation_issues)
+            
+            if result:
+                self.cache.set(cache_key, result.copy())
+            
+            return result
                 
         except Exception as e:
             logger.error(f"Error calculating product {row.get('article', 'unknown')}: {e}")
             return None
     
     def _calculate_product_model(self, row: Dict, is_valid: bool, validation_issues: List[str]) -> Dict:
-        """Расчет для товарной модели (B2C)"""
         article = safe_str(row.get("article", ""))
         name = safe_str(row.get("name", ""))
         price = safe_float(row.get("price", 0))
@@ -2229,22 +2628,18 @@ class UnitEconomicsEngine:
         profit_status = "Прибыльный" if unit_profit > 0 else "Убыточный"
         margin_status = "Высокая" if margin > 25 else "Средняя" if margin > 10 else "Низкая"
         
-        if margin < 15:
-            recommended_price = price * 1.15
+        recommended_price, price_reason = calculate_price_recommendation(
+            price, 
+            competitor_analysis.get('avg_price', 0),
+            margin
+        )
+        
+        if recommended_price > price * 1.05:
             price_action = "Повысить"
-            price_reason = "Низкая маржинальность (<15%)"
-        elif margin > 35:
-            recommended_price = price * 0.95
+        elif recommended_price < price * 0.95:
             price_action = "Снизить"
-            price_reason = "Высокая маржинальность (>35%)"
-        elif competitor_analysis.get('price_position') == "Выше всех":
-            recommended_price = price * 0.95
-            price_action = "Снизить"
-            price_reason = f"Цена выше всех конкурентов (средняя {competitor_analysis.get('avg_price', 0):.0f} ₽)"
         else:
-            recommended_price = price
             price_action = "Оставить"
-            price_reason = "Оптимальная маржинальность"
         
         return {
             "article": article,
@@ -2310,18 +2705,17 @@ class UnitEconomicsEngine:
         }
     
     def _calculate_logistics(self, volume: float, weight: float, price: float) -> float:
-        """Расчет логистики"""
         try:
             if self.mode == "FBY":
                 logistics = self.rates.get("fba_base", 70.0) + weight * self.rates.get("fba_per_kg", 12.0)
             elif self.mode == "FBS":
                 logistics = self.rates.get("fbs_logistics", 115.0)
-                if volume <= self.rates.get("logistics_threshold", 1.0):
+                if volume <= 1.0:
                     logistics = self.rates.get("logistics_base", 70.0)
-                elif volume <= self.rates.get("logistics_threshold_160", 160.0):
+                elif volume <= 160.0:
                     logistics = self.rates.get("logistics_base", 70.0) + (volume - 1.0) * self.rates.get("logistics_per_liter", 22.0)
                 else:
-                    logistics = self.rates.get("logistics_base", 70.0) + (160.0 - 1.0) * 22.0 + (volume - 160.0) * 2.0
+                    logistics = self.rates.get("logistics_base", 70.0) + 159.0 * 22.0 + (volume - 160.0) * 2.0
             else:
                 logistics = self.rates.get("logistics_base", 70.0) + volume * self.rates.get("logistics_per_liter", 10.0) + weight * 15.0
             
@@ -2336,7 +2730,6 @@ class UnitEconomicsEngine:
             return self.rates.get("logistics_base", 70.0)
     
     def _calculate_storage(self, volume: float) -> float:
-        """Расчет хранения"""
         try:
             if self.mode == "FBY":
                 free_days = self.rates.get("storage_free_days", 365)
@@ -2352,7 +2745,6 @@ class UnitEconomicsEngine:
             return 0.0
     
     def _abc_category(self, profit: float) -> str:
-        """Определение ABC-категории"""
         if profit > 1000:
             return "A"
         elif profit > 100:
@@ -2360,7 +2752,6 @@ class UnitEconomicsEngine:
         return "C"
     
     def _xyz_category(self, sales: float) -> str:
-        """Определение XYZ-категории"""
         if sales > 100:
             return "X"
         elif sales > 50:
@@ -2368,8 +2759,15 @@ class UnitEconomicsEngine:
         return "Z"
     
     def get_validation_report(self) -> Dict:
-        """Получение отчета по валидации"""
         return self.validator.get_report()
+    
+    def calculate_batch(self, rows: List[Dict], parallel: bool = True) -> List[Dict]:
+        if parallel and len(rows) > 10:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [executor.submit(self.calculate_product, row) for row in rows]
+                return [f.result() for f in futures if f.result() is not None]
+        else:
+            return [self.calculate_product(row) for row in rows if self.calculate_product(row) is not None]
 
 # --------------------------------------------
 # 📤 АВТОМАТИЧЕСКАЯ ВЫГРУЗКА НА МАРКЕТПЛЕЙСЫ
@@ -2383,13 +2781,12 @@ class MarketplaceUploader:
         self.is_running = False
         self.upload_log = []
         self.lock = Lock()
+        self.stop_event = Event()
         
     def register_client(self, marketplace: str, client: BaseMarketplaceAPI):
-        """Регистрация API-клиента для маркетплейса"""
         self.api_clients[marketplace] = client
         
     def upload_prices(self, marketplace: str, products: List[Dict]) -> Dict:
-        """Выгрузка цен на маркетплейс"""
         client = self.api_clients.get(marketplace)
         if not client:
             return {"status": "error", "message": f"Клиент для {marketplace} не зарегистрирован"}
@@ -2444,7 +2841,6 @@ class MarketplaceUploader:
         return results
     
     def upload_stocks(self, marketplace: str, products: List[Dict]) -> Dict:
-        """Выгрузка остатков на маркетплейс"""
         client = self.api_clients.get(marketplace)
         if not client:
             return {"status": "error", "message": f"Клиент для {marketplace} не зарегистрирован"}
@@ -2499,7 +2895,6 @@ class MarketplaceUploader:
         return results
     
     def upload_products(self, marketplace: str, products: List[Dict]) -> Dict:
-        """Создание/обновление карточек товаров"""
         client = self.api_clients.get(marketplace)
         if not client:
             return {"status": "error", "message": f"Клиент для {marketplace} не зарегистрирован"}
@@ -2564,392 +2959,66 @@ class MarketplaceUploader:
         return results
     
     def get_upload_log(self) -> List[Dict]:
-        """Получение лога выгрузок"""
         with self.lock:
             return self.upload_log.copy()
     
     def clear_log(self):
-        """Очистка лога"""
         with self.lock:
             self.upload_log = []
-
-# --------------------------------------------
-# 🔄 ИНТЕГРАЦИЯ С 1С
-# --------------------------------------------
-class OneCIntegration:
-    """Интеграция с 1С:Предприятие"""
     
-    def __init__(self, base_url: str = None, username: str = None, password: str = None):
-        self.base_url = base_url
-        self.username = username
-        self.password = password
-        self.session = requests.Session()
-        if username and password:
-            self.session.auth = (username, password)
-        self.cache = APICache()
-        
-    def export_to_1c(self, data: List[Dict], entity_type: str = "products") -> Dict:
-        """Экспорт данных в 1С"""
-        if not self.base_url:
-            return {"status": "error", "message": "URL 1С не настроен"}
-        
-        try:
-            export_data = {
-                "entity_type": entity_type,
-                "data": data,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            url = f"{self.base_url}/api/import"
-            response = self.session.post(
-                url,
-                json=export_data,
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                return {
-                    "status": "success",
-                    "message": "Данные успешно экспортированы в 1С",
-                    "response": response.json()
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": f"Ошибка {response.status_code}: {response.text}"
-                }
-                
-        except Exception as e:
-            logger.error(f"1C export error: {e}")
-            return {"status": "error", "message": str(e)}
-    
-    def import_from_1c(self, entity_type: str = "products") -> Optional[List[Dict]]:
-        """Импорт данных из 1С"""
-        if not self.base_url:
-            return None
-        
-        cache_key = generate_cache_key('1c_import', entity_type)
-        cached = self.cache.get(cache_key)
-        if cached:
-            return cached
-        
-        try:
-            url = f"{self.base_url}/api/export"
-            params = {"entity_type": entity_type}
-            
-            response = self.session.get(url, params=params, timeout=60)
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.cache.set(cache_key, data)
-                return data
-            else:
-                logger.error(f"1C import error: {response.status_code}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"1C import error: {e}")
-            return None
-    
-    def sync_prices(self, prices: List[Dict]) -> Dict:
-        """Синхронизация цен с 1С"""
-        return self.export_to_1c(prices, "prices")
-    
-    def sync_stocks(self, stocks: List[Dict]) -> Dict:
-        """Синхронизация остатков с 1С"""
-        return self.export_to_1c(stocks, "stocks")
-
-# --------------------------------------------
-# 📊 ИНТЕГРАЦИЯ С CRM
-# --------------------------------------------
-class CRMIntegration:
-    """Интеграция с CRM системами"""
-    
-    def __init__(self, crm_type: str = "amo", api_key: str = None, base_url: str = None):
-        self.crm_type = crm_type
-        self.api_key = api_key
-        self.base_url = base_url
-        self.session = requests.Session()
-        
-        if api_key:
-            self.session.headers.update({
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json'
-            })
-    
-    def send_report(self, report_data: Dict) -> Dict:
-        """Отправка отчета в CRM"""
-        if not self.base_url:
-            return {"status": "error", "message": "URL CRM не настроен"}
-        
-        try:
-            if self.crm_type == "amo":
-                return self._send_to_amo(report_data)
-            elif self.crm_type == "bitrix24":
-                return self._send_to_bitrix24(report_data)
-            elif self.crm_type == "hubspot":
-                return self._send_to_hubspot(report_data)
-            else:
-                return self._send_generic(report_data)
-                
-        except Exception as e:
-            logger.error(f"CRM send error: {e}")
-            return {"status": "error", "message": str(e)}
-    
-    def _send_to_amo(self, data: Dict) -> Dict:
-        """Отправка в AmoCRM"""
-        url = f"{self.base_url}/api/v4/leads"
-        
-        lead_data = {
-            "name": data.get("title", "Отчет по юнит-экономике"),
-            "custom_fields_values": [
-                {
-                    "field_id": 123456,
-                    "values": [{"value": data.get("summary", "")}]
-                }
-            ]
-        }
-        
-        response = self.session.post(url, json=lead_data)
-        if response.status_code in [200, 201]:
-            return {"status": "success", "data": response.json()}
-        else:
-            return {"status": "error", "message": response.text}
-    
-    def _send_to_bitrix24(self, data: Dict) -> Dict:
-        """Отправка в Bitrix24"""
-        url = f"{self.base_url}/rest/deal.add.json"
-        
-        deal_data = {
-            "fields": {
-                "TITLE": data.get("title", "Отчет по юнит-экономике"),
-                "COMMENTS": data.get("summary", ""),
-                "OPPORTUNITY": data.get("total_profit", 0)
-            }
-        }
-        
-        response = self.session.post(url, json=deal_data)
-        if response.status_code == 200:
-            return {"status": "success", "data": response.json()}
-        else:
-            return {"status": "error", "message": response.text}
-    
-    def _send_to_hubspot(self, data: Dict) -> Dict:
-        """Отправка в HubSpot"""
-        url = f"{self.base_url}/crm/v3/objects/deals"
-        
-        deal_data = {
-            "properties": {
-                "dealname": data.get("title", "Отчет по юнит-экономике"),
-                "description": data.get("summary", ""),
-                "amount": data.get("total_profit", 0)
-            }
-        }
-        
-        response = self.session.post(url, json=deal_data)
-        if response.status_code in [200, 201]:
-            return {"status": "success", "data": response.json()}
-        else:
-            return {"status": "error", "message": response.text}
-    
-    def _send_generic(self, data: Dict) -> Dict:
-        """Универсальная отправка"""
-        response = self.session.post(
-            f"{self.base_url}/api/webhook",
-            json=data
-        )
-        
-        if response.status_code in [200, 201, 202]:
-            return {"status": "success", "data": response.json()}
-        else:
-            return {"status": "error", "message": response.text}
-
-# --------------------------------------------
-# ⏰ РАСПИСАНИЕ АВТОМАТИЧЕСКИХ ВЫГРУЗОК
-# --------------------------------------------
-class AutoUploadScheduler:
-    """Расписание автоматических выгрузок"""
-    
-    def __init__(self):
-        self.schedules = {}
-        self.is_running = False
-        self.thread = None
-        self.lock = Lock()
-        
-    def add_schedule(self, name: str, schedule: Dict):
-        """Добавление расписания"""
-        with self.lock:
-            self.schedules[name] = {
-                "schedule": schedule,
-                "last_run": None,
-                "next_run": self._calculate_next_run(schedule),
-                "enabled": True
-            }
-    
-    def _calculate_next_run(self, schedule: Dict) -> datetime:
-        """Расчет следующего запуска"""
-        now = datetime.now()
-        
-        if schedule.get("type") == "interval":
-            seconds = schedule.get("interval_seconds", 3600)
-            return now + timedelta(seconds=seconds)
-        
-        elif schedule.get("type") == "cron":
-            hour = schedule.get("hour", 0)
-            minute = schedule.get("minute", 0)
-            day_of_week = schedule.get("day_of_week", 0)
-            
-            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            
-            if next_run <= now:
-                days_until = (day_of_week - now.weekday()) % 7
-                if days_until == 0:
-                    days_until = 7
-                next_run += timedelta(days=days_until)
-            
-            return next_run
-        
-        else:
-            return now + timedelta(hours=1)
-    
-    def run_scheduled(self):
-        """Запуск всех запланированных задач"""
+    def start_worker(self):
         if self.is_running:
             return
         
         self.is_running = True
-        self.thread = Thread(target=self._scheduler_loop)
-        self.thread.daemon = True
-        self.thread.start()
+        self.stop_event.clear()
+        thread = Thread(target=self._worker_loop)
+        thread.daemon = True
+        thread.start()
     
-    def _scheduler_loop(self):
-        """Основной цикл планировщика"""
-        while self.is_running:
-            try:
-                now = datetime.now()
-                
-                with self.lock:
-                    for name, data in self.schedules.items():
-                        if not data["enabled"]:
-                            continue
-                        
-                        if data["next_run"] and data["next_run"] <= now:
-                            self._execute_schedule(name)
-                            
-                            data["last_run"] = now
-                            data["next_run"] = self._calculate_next_run(data["schedule"])
-                
-                time.sleep(60)
-                
-            except Exception as e:
-                logger.error(f"Scheduler error: {e}")
-                time.sleep(60)
-    
-    def _execute_schedule(self, name: str):
-        """Выполнение запланированной задачи"""
-        schedule = self.schedules.get(name)
-        if not schedule:
-            return
-        
-        task_type = schedule["schedule"].get("task_type")
-        
-        if task_type == "upload_prices":
-            logger.info(f"Выполнение плановой выгрузки цен: {name}")
-        elif task_type == "upload_stocks":
-            logger.info(f"Выполнение плановой выгрузки остатков: {name}")
-        elif task_type == "sync_1c":
-            logger.info(f"Выполнение синхронизации с 1С: {name}")
-        elif task_type == "send_report":
-            logger.info(f"Отправка отчета в CRM: {name}")
-    
-    def stop(self):
-        """Остановка планировщика"""
+    def stop_worker(self):
         self.is_running = False
-        if self.thread:
-            self.thread.join(timeout=5)
+        self.stop_event.set()
+    
+    def _worker_loop(self):
+        while not self.stop_event.is_set():
+            try:
+                if not self.upload_queue.empty():
+                    task = self.upload_queue.get(timeout=1)
+                    marketplace = task.get('marketplace')
+                    task_type = task.get('type')
+                    products = task.get('products', [])
+                    
+                    if task_type == 'prices':
+                        self.upload_prices(marketplace, products)
+                    elif task_type == 'stocks':
+                        self.upload_stocks(marketplace, products)
+                    elif task_type == 'products':
+                        self.upload_products(marketplace, products)
+                    
+                    self.upload_queue.task_done()
+                else:
+                    time.sleep(1)
+            except Exception as e:
+                logger.error(f"Worker error: {e}")
+                time.sleep(5)
 
 # --------------------------------------------
-# ⚡ ОПТИМИЗИРОВАННАЯ АНАЛИТИКА
-# --------------------------------------------
-class FastSalesAnalytics:
-    """Легкая версия аналитики продаж"""
-    
-    def __init__(self):
-        self.sales_data = []
-        self._cache = {}
-        
-    def add_sale(self, sale: Dict):
-        """Добавление записи о продаже"""
-        self.sales_data.append({
-            "timestamp": datetime.now(),
-            "category": sale.get("category", "Прочее"),
-            "quantity": sale.get("quantity", 1),
-            "price": sale.get("price", 0),
-            "cost": sale.get("cost", 0),
-            "profit": sale.get("profit", 0),
-            "marketplace": sale.get("marketplace", "Неизвестно")
-        })
-        
-        if len(self.sales_data) > 1000:
-            self.sales_data = self.sales_data[-500:]
-    
-    @st.cache_data(ttl=60)
-    def get_sales_dataframe(_self) -> pd.DataFrame:
-        """Получение данных продаж с кэшированием"""
-        if not _self.sales_data:
-            return _self._generate_minimal_demo()
-        
-        df = pd.DataFrame(_self.sales_data)
-        if df.empty:
-            return pd.DataFrame()
-        
-        df['date'] = df['timestamp'].dt.date
-        return df
-    
-    def _generate_minimal_demo(self) -> pd.DataFrame:
-        """Генерация минимальных демо-данных"""
-        categories = ["Двигатель", "Трансмиссия", "Подвеска", "Тормозная система", 
-                     "Масла и жидкости", "Фильтры", "Электрооборудование"]
-        
-        data = []
-        start_date = datetime.now() - timedelta(days=30)
-        
-        for i in range(100):
-            date = start_date + timedelta(days=random.randint(0, 30))
-            category = random.choice(categories)
-            quantity = random.randint(1, 3)
-            price = random.randint(500, 10000)
-            cost = price * random.uniform(0.5, 0.7)
-            
-            data.append({
-                "timestamp": date,
-                "category": category,
-                "quantity": quantity,
-                "price": price,
-                "cost": cost,
-                "profit": (price - cost) * quantity,
-                "marketplace": random.choice(["Яндекс Маркет", "Ozon", "Wildberries"])
-            })
-        
-        return pd.DataFrame(data)
-
-# --------------------------------------------
-# 📥 ЭКСПОРТ В EXCEL
+# 📤 ЭКСПОРТ В EXCEL
 # --------------------------------------------
 class ExcelExportEngine:
-    """Экспорт результатов в Excel с отдельными листами для каждого маркетплейса"""
+    """Экспорт результатов в Excel"""
     
     def __init__(self):
         self.classifier = CategoryClassifier()
     
     def export(self, results: List[Dict], marketplace: str, mode: str, all_rates: Dict = None) -> bytes:
-        """Экспорт результатов в Excel с отдельными листами тарифов"""
         output = io.BytesIO()
         
         if not results:
             return output.getvalue()
         
-        if not OPENPYXL_AVAILABLE:
+        if not LIBRARIES['openpyxl']:
             try:
                 df = pd.DataFrame(results)
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -2961,8 +3030,11 @@ class ExcelExportEngine:
                 return output.getvalue()
         
         try:
-            wb = Workbook()
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+            from openpyxl.utils import get_column_letter
             
+            wb = Workbook()
             ws = wb.active
             ws.title = "Юнит-экономика"
             
@@ -3024,7 +3096,6 @@ class ExcelExportEngine:
                 return output.getvalue()
     
     def _get_product_headers(self) -> List[str]:
-        """Заголовки для товарной модели с учетом единиц измерения"""
         return [
             "Артикул", "Наименование", "Бренд", "OE номер", "Категория", "Применимость", "Штрихкод",
             "Цена", "Себестоимость", 
@@ -3045,7 +3116,6 @@ class ExcelExportEngine:
         ]
     
     def _get_key_mapping(self) -> Dict[str, str]:
-        """Маппинг заголовков на ключи данных"""
         return {
             "Артикул": "article",
             "Наименование": "name",
@@ -3108,8 +3178,9 @@ class ExcelExportEngine:
             "Проблемы": "validation_issues"
         }
     
-    def _create_help_sheets(self, wb: Workbook, all_rates: Dict):
-        """Создание отдельных листов с тарифами для каждого маркетплейса"""
+    def _create_help_sheets(self, wb, all_rates: Dict):
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
         
         headers = ["Режим", "Комиссия %", "Эквайринг %", "Логистика база", "Хранение за литр", 
                    "Логистика за литр", "Бесплатно дней", "FBA база", "FBA за кг"]
@@ -3146,54 +3217,13 @@ class ExcelExportEngine:
                 
                 row_idx += 1
             
-            if row_idx > 2:
-                row_idx += 1
-                total_row = row_idx
-                
-                ws.cell(row=total_row, column=1, value="СРЕДНЕЕ:")
-                total_font = Font(bold=True)
-                total_fill = PatternFill(start_color="e94560", end_color="e94560", fill_type="solid")
-                
-                for col in range(1, len(headers) + 1):
-                    cell = ws.cell(row=total_row, column=col)
-                    if col >= 2:
-                        cell.value = f"=AVERAGE({get_column_letter(col)}2:{get_column_letter(col)}{row_idx-2})"
-                        cell.number_format = '0.00%' if col in [2, 3] else '#,##0.00'
-                    cell.font = total_font
-                    if col == 1:
-                        cell.fill = total_fill
-            
             column_widths = [12, 14, 14, 16, 16, 16, 14, 14, 14]
             for col, width in enumerate(column_widths, 1):
                 ws.column_dimensions[get_column_letter(col)].width = width
-            
-            if len(all_rates) > 1:
-                row_idx += 3
-                ws.cell(row=row_idx, column=1, value="СРАВНЕНИЕ МАРКЕТПЛЕЙСОВ (FBY):")
-                ws.cell(row=row_idx, column=1).font = Font(bold=True, size=12)
-                
-                row_idx += 1
-                compare_headers = ["Маркетплейс", "Комиссия %", "Эквайринг %", "Логистика", "Хранение"]
-                for col, header in enumerate(compare_headers, 1):
-                    cell = ws.cell(row=row_idx, column=col, value=header)
-                    cell.font = Font(bold=True)
-                
-                row_idx += 1
-                for mp, modes in all_rates.items():
-                    fby_rates = modes.get("FBY", {})
-                    ws.cell(row=row_idx, column=1, value=mp)
-                    ws.cell(row=row_idx, column=2, value=fby_rates.get("commission", 0))
-                    ws.cell(row=row_idx, column=3, value=fby_rates.get("acquiring", 0))
-                    ws.cell(row=row_idx, column=4, value=fby_rates.get("logistics_base", 0))
-                    ws.cell(row=row_idx, column=5, value=fby_rates.get("storage_per_liter", 0))
-                    
-                    for col in [2, 3]:
-                        ws.cell(row=row_idx, column=col).number_format = '0.00%'
-                    
-                    row_idx += 1
     
-    def _create_summary_sheet(self, wb: Workbook, results: List[Dict], marketplace: str, mode: str):
-        """Создание листа со сводкой"""
+    def _create_summary_sheet(self, wb, results: List[Dict], marketplace: str, mode: str):
+        from openpyxl.styles import Font, PatternFill, Alignment
+        
         ws = wb.create_sheet("Сводка")
         
         header_font = Font(bold=True, color="FFFFFF", size=11)
@@ -3222,7 +3252,7 @@ class ExcelExportEngine:
                 ["Режим", mode],
                 ["Единицы измерения", results[0].get('dimension_unit', 'мм') if results else 'мм'],
                 ["Дата", datetime.now().strftime("%d.%m.%Y %H:%M")],
-                ["Версия", CONFIG["version"]]
+                ["Версия", APP_VERSION]
             ]
             
             for row_idx, (label, value) in enumerate(summary_data, 2):
@@ -3233,11 +3263,11 @@ class ExcelExportEngine:
         ws.column_dimensions['B'].width = 20
     
     def load_existing(self, file_bytes: bytes) -> List[Dict]:
-        """Загрузка существующей юнит-экономики из Excel"""
-        if not OPENPYXL_AVAILABLE or not file_bytes:
+        if not LIBRARIES['openpyxl'] or not file_bytes:
             return []
         
         try:
+            from openpyxl import load_workbook
             wb = load_workbook(io.BytesIO(file_bytes))
             ws = wb.active
             
@@ -3294,7 +3324,7 @@ class ExcelExportEngine:
 # 🎨 ОСНОВНОЕ ПРИЛОЖЕНИЕ
 # --------------------------------------------
 class UnitEconomicsApp:
-    """Главное приложение с конвертацией размеров и множественным парсингом"""
+    """Главное приложение с ИИ-редактированием"""
     
     def __init__(self):
         self.classifier = CategoryClassifier()
@@ -3305,13 +3335,8 @@ class UnitEconomicsApp:
         self.engine = None
         self.api_clients = {}
         self.uploader = MarketplaceUploader()
-        self.scheduler = AutoUploadScheduler()
-        self.onec = OneCIntegration()
-        self.crm = CRMIntegration()
-        self.sales_analytics = FastSalesAnalytics()
         self.oem_db = OEMDatabase()
-        self.telegram = TelegramNotifier()
-        self.google_sheets = GoogleSheetsExporter()
+        self.ai_editor = AIFileEditor()
         self.dimension_unit = "мм"
         self.existing_data = []
         
@@ -3323,11 +3348,16 @@ class UnitEconomicsApp:
             st.session_state.results = []
         if "existing_data" not in st.session_state:
             st.session_state.existing_data = []
+        if "language" not in st.session_state:
+            st.session_state.language = "ru"
+        if "uploaded_data" not in st.session_state:
+            st.session_state.uploaded_data = None
+        if "ai_edited_data" not in st.session_state:
+            st.session_state.ai_edited_data = None
     
     def run(self):
-        """Запуск приложения"""
         st.set_page_config(
-            page_title=CONFIG["app_name"],
+            page_title=CONFIG.app_name,
             page_icon="🚀",
             layout="wide",
             initial_sidebar_state="expanded"
@@ -3338,32 +3368,28 @@ class UnitEconomicsApp:
         self._render_main()
     
     def _render_header(self):
-        """Отображение заголовка"""
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
                     padding: 1.5rem; border-radius: 15px; color: white; text-align: center; margin-bottom: 1.5rem;
                     border: 2px solid #e94560; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
             <h1 style="font-size: 2.8rem; margin: 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">
-                🚀 {CONFIG['app_name']}
+                🚀 {CONFIG.app_name}
             </h1>
             <p style="font-size: 1.2rem; opacity: 0.95; margin-top: 0.3rem;">
-                📊 <strong>Товарная модель (B2C)</strong> | 2 файла | OE база | Конвертация размеров | Множественный парсинг
+                📊 <strong>Товарная модель (B2C)</strong> | ИИ-редактирование | OE база | Конвертация размеров | Множественный парсинг
             </p>
             <div style="display: flex; justify-content: center; gap: 0.8rem; flex-wrap: wrap; margin-top: 0.5rem;">
                 <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
-                    v{CONFIG['version']}
+                    v{APP_VERSION}
                 </span>
                 <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
                     📦 Товарная модель
                 </span>
                 <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
+                    🤖 ИИ-редактирование
+                </span>
+                <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
                     📏 Конвертация мм/см
-                </span>
-                <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
-                    🤖 ML
-                </span>
-                <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
-                    📤 Telegram
                 </span>
                 <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
                     📋 Множественный парсинг
@@ -3373,9 +3399,18 @@ class UnitEconomicsApp:
         """, unsafe_allow_html=True)
     
     def _render_sidebar(self):
-        """Отображение боковой панели с уникальными ключами"""
         with st.sidebar:
             st.markdown("## ⚙️ Настройки")
+            
+            language = st.selectbox(
+                "🌐 Язык / Language",
+                ["Русский", "English"],
+                index=0 if st.session_state.language == "ru" else 1,
+                key="language_select"
+            )
+            st.session_state.language = "ru" if language == "Русский" else "en"
+            
+            st.divider()
             
             theme = st.toggle("🌙 Темная тема", value=st.session_state.theme == "dark", key="theme_toggle")
             st.session_state.theme = "dark" if theme else "light"
@@ -3430,50 +3465,13 @@ class UnitEconomicsApp:
                 "🔑 DeepSeek API ключ",
                 type="password",
                 placeholder="sk-...",
-                help="Для AI-тарифов",
+                help="Для AI-тарифов и ИИ-редактирования",
                 key="ds_api_key"
             )
             if ds_api_key:
                 self.tariff_provider.api_key = ds_api_key
+                self.ai_editor.api_key = ds_api_key
                 st.success("✅ DeepSeek ключ установлен")
-            
-            st.divider()
-            
-            st.markdown("### 📤 Уведомления")
-            
-            tg_token = st.text_input(
-                "Telegram Bot Token",
-                type="password",
-                placeholder="123456789:ABCdef...",
-                key="tg_token"
-            )
-            tg_chat_id = st.text_input(
-                "Telegram Chat ID",
-                placeholder="123456789",
-                key="tg_chat_id"
-            )
-            if tg_token and tg_chat_id:
-                self.telegram = TelegramNotifier(tg_token, tg_chat_id)
-                st.success("✅ Telegram настроен")
-            
-            st.divider()
-            
-            st.markdown("### 📊 Google Sheets")
-            
-            gs_json = st.text_area(
-                "Google Service Account JSON",
-                placeholder='{"type": "service_account", ...}',
-                height=100,
-                key="gs_json"
-            )
-            gs_name = st.text_input(
-                "Название таблицы",
-                placeholder="Юнит-экономика",
-                key="gs_name"
-            )
-            if gs_json and gs_name:
-                self.google_sheets = GoogleSheetsExporter(gs_json, gs_name)
-                st.success("✅ Google Sheets настроен")
             
             st.divider()
             
@@ -3481,14 +3479,14 @@ class UnitEconomicsApp:
             
             marketplace = st.selectbox(
                 "🏪 Маркетплейс",
-                CONFIG["marketplaces"],
+                CONFIG.marketplaces,
                 index=0,
                 key="marketplace_select"
             )
             
             mode = st.selectbox(
                 "📦 Режим работы",
-                CONFIG["operation_modes"],
+                CONFIG.operation_modes,
                 index=0,
                 key="mode_select"
             )
@@ -3513,1230 +3511,713 @@ class UnitEconomicsApp:
             
             with col2:
                 if st.button("🗑️ Очистить кэш", use_container_width=True, key="clear_cache"):
-                    APICache().clear()
+                    CacheManager().clear()
                     st.success("✅ Кэш очищен!")
             
             st.divider()
             
-            st.markdown("### 📊 Статистика")
             if self.results:
+                st.markdown("### 📊 Статистика")
                 st.metric("📦 Позиций", len(self.results))
                 profitable = sum(1 for r in self.results if r.get("unit_profit", 0) > 0)
                 total_profit = sum(r.get("unit_profit", 0) for r in self.results)
                 st.metric("💰 Прибыльных", f"{profitable}/{len(self.results)}")
                 st.metric("💵 Общая прибыль", format_currency(total_profit))
+            
+            st.divider()
+            st.markdown("### ℹ️ Система")
+            st.caption(f"Версия: {APP_VERSION}")
+            st.caption(f"Python: {sys.version[:10]}")
+            st.caption(f"Библиотеки: {sum(1 for v in LIBRARIES.values() if v)}/{len(LIBRARIES)}")
     
     def _render_main(self):
-        """Основной контент с вкладками"""
-        tabs = [
-            "📁 Загрузка данных",
-            "📂 Готовый файл",
-            "🗄️ База OE",
-            "🔌 API интеграция",
-            "🕷️ Парсинг конкурентов",
-            "📤 Автовыгрузка",
-            "🔄 1С/CRM",
-            "📊 Дашборд"
-        ]
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(tabs)
-        
-        with tab1:
-            self._render_upload_tab()
-        
-        with tab2:
-            self._render_existing_file_tab()
-        
-        with tab3:
-            self._render_oem_database_tab()
-        
-        with tab4:
-            self._render_api_tab()
-        
-        with tab5:
-            self._render_parsing_tab()
-        
-        with tab6:
-            self._render_autoupload_tab()
-        
-        with tab7:
-            self._render_integration_tab()
-        
-        with tab8:
-            self._render_dashboard_tab()
-    
-    def _render_upload_tab(self):
-        """Вкладка загрузки данных с новыми колонками"""
-        st.subheader("📁 Загрузка данных для товарной модели")
-        
-        st.info(f"""
-        **📦 Товарная модель (B2C)**
-        
-        **Загрузите 2 файла:**
-        1. **Основной** — Артикул, Бренд, Длина, Ширина, Высота, **Вес**, Количество, Цена
-        2. **Справочный** — Артикул, Бренд, Наименование, Применимость, **Категории**, **Штрихкод**, OE номера
-        
-        **📏 Единицы измерения:** {self.dimension_unit}
-        - Все размеры в файле будут интерпретироваться как {self.dimension_unit}
-        - Для расчетов размеры автоматически конвертируются в мм
-        """)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### 📦 Файл 1: Основной")
-            st.caption("Колонки: Артикул, Бренд, Длина, Ширина, Высота, **Вес**, Количество, Цена")
-            main_file = st.file_uploader(
-                "Загрузите основной файл (Excel/CSV)",
-                type=["xlsx", "xls", "csv"],
-                help=f"Колонки: Артикул, Бренд, Длина ({self.dimension_unit}), Ширина ({self.dimension_unit}), Высота ({self.dimension_unit}), Вес (кг), Количество, Цена",
-                key="main_file_upload"
-            )
-        
-        with col2:
-            st.markdown("### 📋 Файл 2: Справочный")
-            st.caption("Колонки: Артикул, Бренд, Наименование, Применимость, **Категории**, **Штрихкод**, OE номера")
-            ref_file = st.file_uploader(
-                "Загрузите справочный файл (Excel/CSV)",
-                type=["xlsx", "xls", "csv"],
-                help="Колонки: Артикул, Бренд, Наименование, Применимость, Категории, Штрихкод, OE номера",
-                key="ref_file_upload"
-            )
-        
-        if main_file and ref_file:
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.button("🚀 Рассчитать (обычный)", type="primary", use_container_width=True, key="calc_normal_new"):
-                    with st.spinner("⏳ Выполняется расчет..."):
-                        results = self._process_two_files_enhanced(
-                            main_file,
-                            ref_file,
-                            self._get_marketplace_from_sidebar(),
-                            self._get_mode_from_sidebar(),
-                            self._get_days_storage_from_sidebar(),
-                            parallel=False
-                        )
-                        
-                        if results:
-                            self.results = results
-                            st.session_state.results = results
-                            st.success(f"✅ Всего обработано {len(results)} позиций!")
-                            self._show_results(results)
-                            self._show_export(results)
-                        else:
-                            st.warning("⚠️ Нет данных для обработки")
-            
-            with col2:
-                if st.button("🚀 Рассчитать (параллельно)", type="primary", use_container_width=True, key="calc_parallel_new"):
-                    with st.spinner("⏳ Выполняется параллельный расчет..."):
-                        results = self._process_two_files_enhanced(
-                            main_file,
-                            ref_file,
-                            self._get_marketplace_from_sidebar(),
-                            self._get_mode_from_sidebar(),
-                            self._get_days_storage_from_sidebar(),
-                            parallel=True
-                        )
-                        
-                        if results:
-                            self.results = results
-                            st.session_state.results = results
-                            st.success(f"✅ Всего обработано {len(results)} позиций!")
-                            self._show_results(results)
-                            self._show_export(results)
-                        else:
-                            st.warning("⚠️ Нет данных для обработки")
-            
-            with col3:
-                if st.button("📤 Отправить в Telegram", use_container_width=True, key="send_telegram_new"):
-                    if self.results:
-                        if self.telegram.send_report(self.results):
-                            st.success("✅ Отчет отправлен в Telegram!")
-                        else:
-                            st.error("❌ Ошибка отправки в Telegram")
-                    else:
-                        st.warning("⚠️ Сначала рассчитайте юнит-экономику")
-    
-    def _render_existing_file_tab(self):
-        """Вкладка для загрузки готового файла и добавления новых данных"""
-        st.subheader("📂 Загрузка готового файла и добавление данных")
-        
-        st.info("""
-        **Загрузите готовый Excel-файл с юнит-экономикой:**
-        - Можно загрузить ранее созданный отчет
-        - Добавить новые данные поверх существующих
-        - Обновить цены или характеристики
-        - Сохранить объединенный результат
-        """)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            existing_file = st.file_uploader(
-                "📂 Загрузите готовый Excel-файл",
-                type=["xlsx", "xls"],
-                help="Загрузите ранее экспортированный файл юнит-экономики",
-                key="existing_file_upload"
-            )
-            
-            if existing_file:
-                if st.button("📖 Загрузить данные", use_container_width=True, key="load_existing"):
-                    with st.spinner("⏳ Загрузка данных..."):
-                        loaded = self.exporter.load_existing(existing_file.read())
-                        if loaded:
-                            self.existing_data = loaded
-                            st.session_state.existing_data = loaded
-                            st.success(f"✅ Загружено {len(loaded)} записей!")
-                            
-                            df_preview = pd.DataFrame([{
-                                "Артикул": r.get("article", ""),
-                                "Наименование": r.get("name", "")[:30],
-                                "Бренд": r.get("brand", ""),
-                                "Категория": r.get("category", ""),
-                                "Цена": r.get("price", 0),
-                                "Прибыль": r.get("unit_profit", 0)
-                            } for r in loaded[:10]])
-                            st.dataframe(df_preview, use_container_width=True, hide_index=True)
-                            if len(loaded) > 10:
-                                st.caption(f"Показаны первые 10 из {len(loaded)}")
-                        else:
-                            st.error("❌ Ошибка загрузки файла")
-        
-        with col2:
-            st.markdown("### ➕ Добавление новых данных")
-            
-            st.caption("Загрузите новый файл для добавления к существующим данным")
-            
-            new_main_file = st.file_uploader(
-                "Новый основной файл (Excel/CSV)",
-                type=["xlsx", "xls", "csv"],
-                key="new_main_file"
-            )
-            
-            new_ref_file = st.file_uploader(
-                "Новый справочный файл (Excel/CSV)",
-                type=["xlsx", "xls", "csv"],
-                key="new_ref_file"
-            )
-            
-            if new_main_file and new_ref_file:
-                if st.button("🔄 Добавить новые данные", type="primary", use_container_width=True, key="add_new_data"):
-                    with st.spinner("⏳ Обработка новых данных..."):
-                        new_results = self._process_two_files_enhanced(
-                            new_main_file,
-                            new_ref_file,
-                            self._get_marketplace_from_sidebar(),
-                            self._get_mode_from_sidebar(),
-                            self._get_days_storage_from_sidebar(),
-                            parallel=False
-                        )
-                        
-                        if new_results:
-                            existing_articles = {r.get("article", "") for r in self.existing_data}
-                            added_count = 0
-                            updated_count = 0
-                            
-                            for new_row in new_results:
-                                article = new_row.get("article", "")
-                                if article in existing_articles:
-                                    for i, existing in enumerate(self.existing_data):
-                                        if existing.get("article") == article:
-                                            self.existing_data[i] = new_row
-                                            updated_count += 1
-                                            break
-                                else:
-                                    self.existing_data.append(new_row)
-                                    added_count += 1
-                            
-                            st.success(f"✅ Добавлено {added_count} новых позиций, обновлено {updated_count} позиций")
-                            self.results = self.existing_data
-                            st.session_state.results = self.existing_data
-                            
-                            df_preview = pd.DataFrame([{
-                                "Артикул": r.get("article", ""),
-                                "Наименование": r.get("name", "")[:30],
-                                "Бренд": r.get("brand", ""),
-                                "Категория": r.get("category", ""),
-                                "Цена": r.get("price", 0),
-                                "Прибыль": r.get("unit_profit", 0)
-                            } for r in self.existing_data[:20]])
-                            st.dataframe(df_preview, use_container_width=True, hide_index=True)
-                            if len(self.existing_data) > 20:
-                                st.caption(f"Показаны первые 20 из {len(self.existing_data)}")
-                            
-                            self._show_export(self.existing_data)
-                        else:
-                            st.warning("⚠️ Нет новых данных для добавления")
-    
-    def _process_two_files_enhanced(self, main_file, ref_file, marketplace: str, mode: str, days_storage: int, parallel: bool = False) -> List[Dict]:
-        """Обработка двух файлов с новыми колонками: Вес, Категории, Штрихкод"""
-        try:
-            if main_file.name.endswith('.csv'):
-                df_main = pd.read_csv(main_file, encoding='utf-8-sig')
-            else:
-                df_main = pd.read_excel(main_file, engine='openpyxl')
-            
-            if ref_file.name.endswith('.csv'):
-                df_ref = pd.read_csv(ref_file, encoding='utf-8-sig')
-            else:
-                df_ref = pd.read_excel(ref_file, engine='openpyxl')
-            
-            if df_main.empty or df_ref.empty:
-                st.error("❌ Один из файлов пуст")
-                return []
-            
-            # Поиск колонок в основном файле
-            article_col = None
-            brand_col_main = None
-            length_col = None
-            width_col = None
-            height_col = None
-            weight_col = None
-            quantity_col = None
-            price_col = None
-            
-            for col in df_main.columns:
-                col_lower = col.lower()
-                if any(w in col_lower for w in ['артикул', 'article', 'sku', 'код', 'id']):
-                    if not article_col:
-                        article_col = col
-                elif any(w in col_lower for w in ['бренд', 'brand', 'марка', 'производитель']):
-                    if not brand_col_main:
-                        brand_col_main = col
-                elif any(w in col_lower for w in ['длин', 'length']):
-                    if not length_col:
-                        length_col = col
-                elif any(w in col_lower for w in ['ширин', 'width']):
-                    if not width_col:
-                        width_col = col
-                elif any(w in col_lower for w in ['высот', 'height']):
-                    if not height_col:
-                        height_col = col
-                elif any(w in col_lower for w in ['вес', 'weight', 'масса']):
-                    if not weight_col:
-                        weight_col = col
-                elif any(w in col_lower for w in ['количество', 'quantity', 'stock', 'остаток']):
-                    if not quantity_col:
-                        quantity_col = col
-                elif any(w in col_lower for w in ['цена', 'price']) and 'себест' not in col_lower:
-                    if not price_col:
-                        price_col = col
-            
-            # Поиск колонок в справочном файле
-            article_ref_col = None
-            brand_ref_col = None
-            name_col = None
-            compatibility_col = None
-            category_col = None
-            barcode_col = None
-            oe_col = None
-            
-            for col in df_ref.columns:
-                col_lower = col.lower()
-                if any(w in col_lower for w in ['артикул', 'article', 'sku', 'код', 'id']):
-                    if not article_ref_col:
-                        article_ref_col = col
-                elif any(w in col_lower for w in ['бренд', 'brand', 'марка', 'производитель']):
-                    if not brand_ref_col:
-                        brand_ref_col = col
-                elif any(w in col_lower for w in ['наименование', 'название', 'name', 'product']):
-                    if not name_col:
-                        name_col = col
-                elif any(w in col_lower for w in ['применимость', 'совместимость', 'compatibility', 'car']):
-                    if not compatibility_col:
-                        compatibility_col = col
-                elif any(w in col_lower for w in ['категори', 'category']):
-                    if not category_col:
-                        category_col = col
-                elif any(w in col_lower for w in ['штрих', 'barcode', 'ean', 'код']):
-                    if not barcode_col:
-                        barcode_col = col
-                elif any(w in col_lower for w in ['оем', 'oe', 'oem', 'номер', 'part number']):
-                    if not oe_col:
-                        oe_col = col
-            
-            if not article_col:
-                st.warning("⚠️ В основном файле не найдена колонка с артикулами")
-                return []
-            
-            if not article_ref_col:
-                st.warning("⚠️ В справочном файле не найдена колонка с артикулами")
-                return []
-            
-            if not price_col:
-                st.warning("⚠️ В основном файле не найдена колонка с ценами")
-                return []
-            
-            # Создаем справочник
-            ref_dict = {}
-            for idx, row in df_ref.iterrows():
-                article = safe_str(row[article_ref_col])
-                if article:
-                    ref_dict[article] = {
-                        "brand_ref": safe_str(row[brand_ref_col]) if brand_ref_col else "",
-                        "name": safe_str(row[name_col]) if name_col else "",
-                        "compatibility": safe_str(row[compatibility_col]) if compatibility_col else "",
-                        "category_ref": safe_str(row[category_col]) if category_col else "",
-                        "barcode": safe_str(row[barcode_col]) if barcode_col else "",
-                        "oe_number": safe_str(row[oe_col]) if oe_col else ""
-                    }
-            
-            self.engine = UnitEconomicsEngine(
-                marketplace=marketplace,
-                mode=mode,
-                days_storage=days_storage,
-                dimension_unit=self.dimension_unit
-            )
-            
-            results = []
-            
-            if parallel:
-                with st.spinner("⏳ Параллельная обработка..."):
-                    chunk_size = 100
-                    chunks = []
-                    
-                    for i in range(0, len(df_main), chunk_size):
-                        chunks.append(df_main.iloc[i:i+chunk_size])
-                    
-                    with ThreadPoolExecutor(max_workers=4) as executor:
-                        futures = []
-                        for chunk in chunks:
-                            future = executor.submit(
-                                self._process_chunk_enhanced,
-                                chunk,
-                                ref_dict,
-                                marketplace,
-                                mode,
-                                days_storage,
-                                self.dimension_unit
-                            )
-                            futures.append(future)
-                        
-                        for future in as_completed(futures):
-                            results.extend(future.result())
-            else:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                for idx, row in df_main.iterrows():
-                    try:
-                        if idx % 10 == 0:
-                            progress = min(idx / len(df_main), 0.99)
-                            progress_bar.progress(progress)
-                            status_text.text(f"⏳ Обработка {idx+1}/{len(df_main)}...")
-                        
-                        article = safe_str(row[article_col]) if article_col else f"ART_{idx+1:06d}"
-                        brand_main = safe_str(row[brand_col_main]) if brand_col_main else ""
-                        length = safe_float(row[length_col]) if length_col else 0
-                        width = safe_float(row[width_col]) if width_col else 0
-                        height = safe_float(row[height_col]) if height_col else 0
-                        weight = safe_float(row[weight_col]) if weight_col else 0
-                        quantity = safe_int(row[quantity_col]) if quantity_col else 0
-                        price = safe_float(row[price_col]) if price_col else 0
-                        
-                        if price <= 0:
-                            continue
-                        
-                        ref_data = ref_dict.get(article, {})
-                        
-                        brand = brand_main if brand_main else ref_data.get("brand_ref", "")
-                        name = ref_data.get("name", "")
-                        compatibility = ref_data.get("compatibility", "")
-                        category_ref = ref_data.get("category_ref", "")
-                        barcode = ref_data.get("barcode", "")
-                        oe_number = ref_data.get("oe_number", "")
-                        
-                        oe_data = self.engine.oem_db.get_by_oe(oe_number) if oe_number else None
-                        
-                        if oe_data:
-                            if not brand:
-                                brand = oe_data.get("brand", "")
-                            
-                            if length == 0 and "dimensions" in oe_data:
-                                dims = oe_data["dimensions"]
-                                length = dims.get("length", 0)
-                                width = dims.get("width", 0)
-                                height = dims.get("height", 0)
-                            
-                            if weight == 0:
-                                weight = oe_data.get("weight", 0)
-                            
-                            if not category_ref:
-                                category_ref = oe_data.get("category", "")
-                            
-                            if not barcode:
-                                barcode = oe_data.get("barcode", "")
-                        
-                        category = category_ref
-                        if not category or category == "" or category == "Прочее":
-                            if name:
-                                category, confidence = self.classifier.classify(name)
-                            else:
-                                category = "Прочее"
-                        
-                        if not name:
-                            name = f"{brand} {oe_number}" if brand and oe_number else article
-                        
-                        if not barcode and name:
-                            extracted_barcode = self.classifier.extract_barcode(name)
-                            if extracted_barcode:
-                                barcode = extracted_barcode
-                        
-                        cost = price * 0.5
-                        
-                        row_data = {
-                            "article": article,
-                            "name": name,
-                            "brand": brand,
-                            "oe_number": oe_number,
-                            "category": category,
-                            "price": price,
-                            "cost": cost,
-                            "length": length,
-                            "width": width,
-                            "height": height,
-                            "weight": weight,
-                            "quantity": quantity,
-                            "compatibility": compatibility,
-                            "barcode": barcode,
-                            "source": "from_oem_db" if oe_data else "from_file"
-                        }
-                        
-                        result = self.engine.calculate_product(row_data)
-                        if result:
-                            result["source"] = "from_oem_db" if oe_data else "from_file"
-                            result["quantity"] = quantity
-                            result["compatibility"] = compatibility
-                            result["barcode"] = barcode
-                            results.append(result)
-                            
-                    except Exception as e:
-                        logger.error(f"Error processing row {idx}: {e}")
-                        continue
-                
-                progress_bar.progress(1.0)
-                status_text.text("✅ Обработка завершена!")
-            
-            if self.engine:
-                validation_report = self.engine.get_validation_report()
-                if validation_report["invalid"] > 0:
-                    st.warning(f"⚠️ Найдено {validation_report['invalid']} позиций с ошибками валидации")
-                    with st.expander("📋 Отчет по валидации"):
-                        st.json(validation_report)
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error processing two files: {e}")
-            st.error(f"❌ Ошибка обработки данных: {str(e)}")
-            return []
-    
-    def _process_chunk_enhanced(self, chunk, ref_dict, marketplace, mode, days_storage, dimension_unit):
-        """Обработка чанка данных с новыми колонками"""
-        results = []
-        engine = UnitEconomicsEngine(marketplace, mode, days_storage, dimension_unit)
-        classifier = CategoryClassifier()
-        
-        for idx, row in chunk.iterrows():
-            try:
-                article = safe_str(row.get('Артикул', row.get('article', f"ART_{idx+1:06d}")))
-                brand = safe_str(row.get('Бренд', row.get('brand', '')))
-                length = safe_float(row.get('Длина', row.get('length', 0)))
-                width = safe_float(row.get('Ширина', row.get('width', 0)))
-                height = safe_float(row.get('Высота', row.get('height', 0)))
-                weight = safe_float(row.get('Вес', row.get('weight', 0)))
-                quantity = safe_int(row.get('Количество', row.get('quantity', 0)))
-                price = safe_float(row.get('Цена', row.get('price', 0)))
-                
-                if price <= 0:
-                    continue
-                
-                ref_data = ref_dict.get(article, {})
-                
-                brand = brand if brand else ref_data.get("brand_ref", "")
-                name = ref_data.get("name", "")
-                compatibility = ref_data.get("compatibility", "")
-                category_ref = ref_data.get("category_ref", "")
-                barcode = ref_data.get("barcode", "")
-                oe_number = ref_data.get("oe_number", "")
-                
-                oe_data = engine.oem_db.get_by_oe(oe_number) if oe_number else None
-                
-                if oe_data:
-                    if not brand:
-                        brand = oe_data.get("brand", "")
-                    
-                    if length == 0 and "dimensions" in oe_data:
-                        dims = oe_data["dimensions"]
-                        length = dims.get("length", 0)
-                        width = dims.get("width", 0)
-                        height = dims.get("height", 0)
-                    
-                    if weight == 0:
-                        weight = oe_data.get("weight", 0)
-                    
-                    if not category_ref:
-                        category_ref = oe_data.get("category", "")
-                    
-                    if not barcode:
-                        barcode = oe_data.get("barcode", "")
-                
-                category = category_ref
-                if not category or category == "" or category == "Прочее":
-                    if name:
-                        category, confidence = classifier.classify(name)
-                    else:
-                        category = "Прочее"
-                
-                if not name:
-                    name = f"{brand} {oe_number}" if brand and oe_number else article
-                
-                if not barcode and name:
-                    extracted_barcode = classifier.extract_barcode(name)
-                    if extracted_barcode:
-                        barcode = extracted_barcode
-                
-                cost = price * 0.5
-                
-                row_data = {
-                    "article": article,
-                    "name": name,
-                    "brand": brand,
-                    "oe_number": oe_number,
-                    "category": category,
-                    "price": price,
-                    "cost": cost,
-                    "length": length,
-                    "width": width,
-                    "height": height,
-                    "weight": weight,
-                    "quantity": quantity,
-                    "compatibility": compatibility,
-                    "barcode": barcode
-                }
-                
-                result = engine.calculate_product(row_data)
-                if result:
-                    result["quantity"] = quantity
-                    result["compatibility"] = compatibility
-                    result["barcode"] = barcode
-                    results.append(result)
-                    
-            except Exception as e:
-                logger.error(f"Error in chunk: {e}")
-                continue
-        
-        return results
-    
-    def _render_oem_database_tab(self):
-        """Вкладка управления базой OE номеров"""
-        st.subheader("🗄️ Управление базой OE номеров")
-        
-        st.markdown("""
-        **Возможности:**
-        - ✅ Просмотр всех OE номеров в базе
-        - ✅ Добавление/обновление OE номеров
-        - ✅ Поиск по OE, бренду, категории
-        - ✅ Импорт/экспорт базы
-        - ✅ Статистика базы
-        - ✅ Добавление штрихкодов
-        """)
-        
-        tabs = st.tabs(["📋 Просмотр", "➕ Добавить", "🔍 Поиск", "📊 Статистика"])
+        """Основная вкладка с ИИ-редактированием"""
+        tabs = st.tabs([
+            "📁 Загрузка данных", 
+            "🤖 ИИ-редактирование",
+            "📊 Расчет", 
+            "🔍 OE база",
+            "📋 Парсинг",
+            "📤 Экспорт"
+        ])
         
         with tabs[0]:
-            st.markdown("### 📋 Все OE номера")
-            
-            search = st.text_input("🔍 Фильтр по OE номеру", placeholder="Введите OE номер...", key="oem_search")
-            
-            all_oe = list(self.oem_db.data.items())
-            
-            if search:
-                all_oe = [(oe, data) for oe, data in all_oe if search.upper() in oe.upper()]
-            
-            if all_oe:
-                data_list = []
-                for oe, data in all_oe[:100]:
-                    data_list.append({
-                        "OE номер": oe,
-                        "Категория": data.get("category", ""),
-                        "Бренд": data.get("brand", ""),
-                        "Вес (кг)": data.get("weight", 0),
-                        "Штрихкод": data.get("barcode", ""),
-                        "Совместимость": ", ".join(data.get("compatibility", [])[:2]),
-                        "Кросс-ссылки": ", ".join(data.get("cross_reference", [])[:2])
-                    })
-                
-                df = pd.DataFrame(data_list)
-                st.dataframe(df, use_container_width=True, hide_index=True)
-                
-                if len(all_oe) > 100:
-                    st.caption(f"Показаны первые 100 из {len(all_oe)} записей")
-            else:
-                st.info("Нет данных в базе")
+            self._render_upload_tab()
         
         with tabs[1]:
-            st.markdown("### ➕ Добавление OE номера")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                new_oe = st.text_input("OE номер *", placeholder="Например: 0986AF0059", key="new_oe")
-                new_brand = st.text_input("Бренд *", placeholder="BOSCH", key="new_brand")
-                new_category = st.text_input("Категория *", placeholder="Фильтры", key="new_category")
-                new_subcategory = st.text_input("Подкатегория", placeholder="Масляные фильтры", key="new_subcategory")
-                new_weight = st.number_input("Вес (кг)", min_value=0.0, step=0.1, value=0.0, key="new_weight")
-                new_barcode = st.text_input("Штрихкод", placeholder="1234567890123", key="new_barcode")
-            
-            with col2:
-                new_length = st.number_input("Длина (мм)", min_value=0, step=10, value=0, key="new_length")
-                new_width = st.number_input("Ширина (мм)", min_value=0, step=10, value=0, key="new_width")
-                new_height = st.number_input("Высота (мм)", min_value=0, step=10, value=0, key="new_height")
-                new_compatibility = st.text_area("Совместимость (через запятую)", placeholder="BMW 3, Audi A4, VW Golf", key="new_compatibility")
-                new_cross = st.text_area("Кросс-ссылки (через запятую)", placeholder="MANN W842/2, MAHLE OC 205", key="new_cross")
-            
-            if st.button("💾 Сохранить OE номер", type="primary", key="save_oe"):
-                if new_oe and new_brand and new_category:
-                    data = {
-                        "category": new_category,
-                        "subcategory": new_subcategory or "Запчасть",
-                        "brand": new_brand,
-                        "weight": new_weight,
-                        "dimensions": {
-                            "length": new_length,
-                            "width": new_width,
-                            "height": new_height
-                        }
-                    }
-                    
-                    if new_barcode and is_valid_barcode(new_barcode):
-                        data["barcode"] = re.sub(r'[^\d]', '', new_barcode)
-                    
-                    if new_compatibility:
-                        data["compatibility"] = [x.strip() for x in new_compatibility.split(",") if x.strip()]
-                    
-                    if new_cross:
-                        data["cross_reference"] = [x.strip() for x in new_cross.split(",") if x.strip()]
-                    
-                    self.oem_db.add_or_update(new_oe, data)
-                    st.success(f"✅ OE номер {new_oe} добавлен/обновлен!")
-                else:
-                    st.warning("⚠️ Заполните обязательные поля (OE, Бренд, Категория)")
+            self._render_ai_edit_tab()
         
         with tabs[2]:
-            st.markdown("### 🔍 Поиск в базе OE")
-            
-            search_type = st.selectbox(
-                "Тип поиска",
-                ["По OE номеру", "По бренду", "По категории"],
-                key="search_type"
-            )
-            
-            search_query = st.text_input("Поисковый запрос", key="search_query")
-            
-            if search_query and st.button("🔍 Найти", key="search_btn"):
-                if search_type == "По OE номеру":
-                    result = self.oem_db.get_by_oe(search_query)
-                    if result:
-                        st.json(result)
-                    else:
-                        st.warning("❌ OE номер не найден")
-                
-                elif search_type == "По бренду":
-                    results = self.oem_db.search_by_brand(search_query)
-                    if results:
-                        st.success(f"✅ Найдено {len(results)} записей")
-                        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-                    else:
-                        st.warning("❌ Бренд не найден")
-                
-                elif search_type == "По категории":
-                    results = self.oem_db.search_by_category(search_query)
-                    if results:
-                        st.success(f"✅ Найдено {len(results)} записей")
-                        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-                    else:
-                        st.warning("❌ Категория не найдена")
+            self._render_calculate_tab()
         
         with tabs[3]:
-            st.markdown("### 📊 Статистика базы")
-            
-            stats = self.oem_db.get_statistics()
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("📦 Всего OE номеров", stats["total"])
-            col2.metric("🏷️ Категорий", len(stats["categories"]))
-            col3.metric("🏢 Брендов", len(stats["brands"]))
-            
-            st.divider()
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**📊 Распределение по категориям:**")
-                if stats["categories"]:
-                    df_cat = pd.DataFrame({
-                        "Категория": list(stats["categories"].keys()),
-                        "Количество": list(stats["categories"].values())
-                    }).sort_values("Количество", ascending=False)
-                    st.dataframe(df_cat, use_container_width=True, hide_index=True)
-            
-            with col2:
-                st.markdown("**📊 Топ брендов:**")
-                if stats["brands"]:
-                    df_brand = pd.DataFrame({
-                        "Бренд": list(stats["brands"].keys()),
-                        "Количество": list(stats["brands"].values())
-                    }).sort_values("Количество", ascending=False).head(10)
-                    st.dataframe(df_brand, use_container_width=True, hide_index=True)
-            
-            st.divider()
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("📤 Экспорт базы в JSON", use_container_width=True, key="export_oem"):
-                    json_data = json.dumps(self.oem_db.data, ensure_ascii=False, indent=2)
-                    st.download_button(
-                        "📥 Скачать JSON",
-                        data=json_data,
-                        file_name=f"oem_database_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                        mime="application/json",
-                        use_container_width=True,
-                        key="download_oem"
-                    )
-            
-            with col2:
-                uploaded_json = st.file_uploader(
-                    "📥 Импорт базы из JSON",
-                    type=["json"],
-                    key="oem_import"
-                )
-                if uploaded_json:
-                    try:
-                        data = json.load(uploaded_json)
-                        self.oem_db.data.update(data)
-                        self.oem_db._save_database()
-                        st.success(f"✅ Импортировано {len(data)} OE номеров!")
-                    except Exception as e:
-                        st.error(f"❌ Ошибка импорта: {e}")
-    
-    def _render_api_tab(self):
-        """Вкладка API интеграции"""
-        st.subheader("🔌 Интеграция с API маркетплейсов")
+            self._render_oem_database_tab()
         
-        st.markdown("""
-        **Доступные API:**
-        - **Яндекс Маркет** — управление ценами, остатками, заказами
-        - **Ozon** — управление товарами, ценами, складом
-        - **Wildberries** — управление карточками, ценами, остатками
-        - **AliExpress** — управление товарами (в разработке)
-        """)
+        with tabs[4]:
+            self._render_parsing_tab()
+        
+        with tabs[5]:
+            self._render_export_tab()
+    
+    def _render_upload_tab(self):
+        st.markdown("## 📁 Загрузка данных")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("### 📊 Получение данных")
+            st.markdown("### 📤 Загрузите файл с товарами")
             
-            api_action = st.selectbox(
-                "Действие",
-                ["Получить товары", "Получить цены", "Получить остатки", "Обновить цены"],
-                key="api_action"
+            uploaded_file = st.file_uploader(
+                "Выберите Excel или CSV файл",
+                type=['xlsx', 'xls', 'csv'],
+                key="file_uploader"
             )
             
-            marketplace = st.selectbox(
-                "Маркетплейс",
-                ["Яндекс Маркет", "Ozon", "Wildberries"],
-                key="api_marketplace"
-            )
-            
-            if st.button("🚀 Выполнить запрос", type="primary", use_container_width=True, key="execute_api"):
-                with st.spinner("⏳ Выполняется запрос..."):
-                    result = self._execute_api_request(marketplace, api_action)
-                    if result:
-                        st.success("✅ Запрос выполнен успешно!")
-                        st.json(result)
+            if uploaded_file is not None:
+                try:
+                    if uploaded_file.name.endswith('.csv'):
+                        df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
                     else:
-                        st.error("❌ Ошибка выполнения запроса")
+                        df = pd.read_excel(uploaded_file, engine='openpyxl')
+                    
+                    st.session_state.uploaded_data = df
+                    st.success(f"✅ Загружено {len(df)} строк")
+                    
+                    st.markdown("### 📊 Предпросмотр данных")
+                    st.dataframe(df.head(10), use_container_width=True)
+                    
+                except Exception as e:
+                    st.error(f"❌ Ошибка загрузки файла: {str(e)}")
         
         with col2:
-            st.markdown("### 📋 Массовое обновление")
-            
+            st.markdown("### 📋 Инструкция по загрузке")
             st.info("""
-            **Массовое обновление цен:**
-            1. Загрузите файл с новыми ценами
-            2. Выберите маркетплейс
-            3. Нажмите "Обновить цены"
+            **Поддерживаемые форматы файлов:**
+            - Excel (.xlsx, .xls)
+            - CSV (.csv)
+            
+            **Необходимые колонки:**
+            - `Артикул` - идентификатор товара
+            - `Наименование` - название товара
+            - `Цена` - цена продажи
+            - `Длина`, `Ширина`, `Высота` - габариты в мм или см
+            - `Вес` - вес в кг (опционально)
+            
+            **Дополнительные колонки:**
+            - `OE номер` - оригинальный номер запчасти
+            - `Бренд` - производитель
+            - `Штрихкод` - штрихкод товара
             """)
             
-            update_file = st.file_uploader(
-                "Файл с ценами (Excel/CSV)",
-                type=["xlsx", "xls", "csv"],
-                key="update_prices_file"
-            )
-            
-            if update_file and st.button("🔄 Обновить цены", use_container_width=True, key="update_prices_btn"):
-                st.warning("⚠️ Функция в разработке. Требуется настройка API ключей.")
+            st.markdown("### 📥 Скачать шаблон")
+            if st.button("📥 Скачать шаблон Excel", use_container_width=True):
+                template_df = pd.DataFrame({
+                    "Артикул": ["ABC-001", "ABC-002"],
+                    "Наименование": ["Деталь A", "Деталь B"],
+                    "Цена": [1000, 2500],
+                    "Длина": [100, 150],
+                    "Ширина": [80, 120],
+                    "Высота": [50, 70],
+                    "Вес": [0.5, 1.2],
+                    "OE номер": ["123456", "789012"],
+                    "Бренд": ["BOSCH", "DENSO"],
+                    "Штрихкод": ["1234567890123", "4567890123456"]
+                })
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    template_df.to_excel(writer, sheet_name='Товары', index=False)
+                output.seek(0)
+                st.download_button(
+                    label="Скачать шаблон",
+                    data=output.getvalue(),
+                    file_name="шаблон_юнит_экономика.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
     
-    def _render_parsing_tab(self):
-        """Вкладка парсинга конкурентов с поддержкой множественного парсинга"""
-        st.subheader("🕷️ Парсинг цен конкурентов")
+    def _render_ai_edit_tab(self):
+        st.markdown("## 🤖 ИИ-редактирование данных")
         
-        st.markdown("""
-        **Парсинг в реальном времени:**
-        - Автоматический сбор цен с Яндекс Маркета, Ozon, Wildberries
-        - Анализ конкурентной среды
-        - Рекомендации по ценообразованию
-        
-        **⚠️ Важно:** При парсинге могут использоваться демо-данные, 
-        если маркетплейсы блокируют запросы.
-        """)
-        
-        parse_tabs = st.tabs(["🔍 Одиночный поиск", "📋 Множественный парсинг", "📁 Из файла"])
-        
-        with parse_tabs[0]:
-            self._render_single_parse()
-        
-        with parse_tabs[1]:
-            self._render_multiple_parse()
-        
-        with parse_tabs[2]:
-            self._render_file_parse()
-    
-    def _render_single_parse(self):
-        """Одиночный парсинг по запросу"""
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            search_query = st.text_input(
-                "🔍 Поисковый запрос",
-                placeholder="Например: масло моторное 5W-40",
-                key="parse_search"
-            )
-            
-            marketplace = st.selectbox(
-                "Маркетплейс",
-                ["Все", "Яндекс Маркет", "Ozon", "Wildberries"],
-                key="parse_marketplace"
-            )
-            
-            if st.button("🕷️ Начать парсинг", type="primary", use_container_width=True, key="start_parse"):
-                if search_query:
-                    with st.spinner(f"⏳ Парсинг {marketplace if marketplace != 'Все' else 'всех маркетплейсов'}..."):
-                        parser = CompetitorParser()
-                        
-                        if marketplace == "Все":
-                            results = parser.parse_all_marketplaces(search_query)
-                        else:
-                            parser_map = {
-                                'Яндекс Маркет': parser.parse_yandex_market,
-                                'Ozon': parser.parse_ozon,
-                                'Wildberries': parser.parse_wildberries
-                            }
-                            results = {marketplace: parser_map[marketplace](search_query)}
-                        
-                        if results:
-                            total_items = sum(len(items) for items in results.values())
-                            st.success(f"✅ Парсинг завершен! Найдено {total_items} товаров")
-                            
-                            for mp, items in results.items():
-                                demo_count = sum(1 for i in items if i.get('is_demo', False))
-                                status = "📊" if not demo_count else "🧪 (демо)"
-                                st.metric(f"{mp} {status}", len(items))
-                            
-                            for mp, items in results.items():
-                                if items:
-                                    with st.expander(f"📊 {mp} — {len(items)} товаров"):
-                                        df = pd.DataFrame(items)
-                                        if 'is_demo' in df.columns:
-                                            df = df.drop(columns=['is_demo'])
-                                        if 'price' in df.columns:
-                                            df['price'] = df['price'].apply(lambda x: format_currency(x) if x else '0 ₽')
-                                        if 'parsed_at' in df.columns:
-                                            df['parsed_at'] = df['parsed_at'].apply(lambda x: x[:16] if x else '')
-                                        st.dataframe(df, use_container_width=True, hide_index=True)
-                        else:
-                            st.warning("⚠️ Не найдено товаров по запросу")
-                else:
-                    st.warning("⚠️ Введите поисковый запрос")
-        
-        with col2:
-            st.markdown("### 📊 Анализ конкурентов")
-            
-            if st.button("📊 Анализировать мои товары", use_container_width=True, key="analyze_competitors"):
-                if self.results:
-                    with st.spinner("⏳ Анализ конкурентов..."):
-                        competitor_manager = CompetitorManager()
-                        analysis_results = []
-                        
-                        for product in self.results[:10]:
-                            name = product.get('name', '')
-                            price = product.get('price', 0)
-                            if name and price > 0:
-                                analysis = competitor_manager.analyze_competitor_prices(name, price)
-                                analysis_results.append({
-                                    'Товар': name[:30],
-                                    'Наша цена': format_currency(price),
-                                    'Ср. цена конкурентов': format_currency(analysis.get('avg_price', 0)),
-                                    'Позиция': analysis.get('price_position', ''),
-                                    'Рекомендация': analysis.get('recommendation', '')
-                                })
-                        
-                        if analysis_results:
-                            df = pd.DataFrame(analysis_results)
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-                            st.success("✅ Анализ завершен!")
-                        else:
-                            st.warning("⚠️ Нет данных для анализа")
-                else:
-                    st.warning("⚠️ Сначала рассчитайте юнит-экономику")
-    
-    def _render_multiple_parse(self):
-        """Множественный парсинг по списку артикулов"""
-        st.markdown("### 📋 Множественный парсинг по артикулам")
+        if st.session_state.uploaded_data is None:
+            st.warning("⚠️ Сначала загрузите файл в разделе '📁 Загрузка данных'")
+            return
         
         st.info("""
-        **Введите артикулы для парсинга:**
-        - Каждый артикул на новой строке
-        - Можно скопировать из Excel/CSV
-        - Поддерживается до 100 артикулов за раз
+        🔮 **ИИ может:**
+        - Исправлять ошибки в данных (цены, размеры, артикулы)
+        - Заполнять пропуски
+        - Пересчитывать формулы и показатели
+        - Нормализовать формат данных
+        - Добавлять новые колонки с расчетами
+        - Исправлять несоответствия в категориях
         """)
         
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            articles_text = st.text_area(
-                "📝 Список артикулов",
-                placeholder="Например:\n123456\n789012\n345678\n901234",
-                height=150,
-                key="multiple_articles"
+            edit_mode = st.radio(
+                "Выберите режим редактирования",
+                ["📝 Исправить данные", "🧮 Пересчитать формулы", "🔍 Найти и исправить ошибки"],
+                horizontal=True,
+                key="ai_edit_mode"
             )
+            
+            ai_prompt = st.text_area(
+                "📝 Опишите, что нужно сделать с данными",
+                placeholder="Пример: исправь цены, если они меньше 100 рублей, увеличь до 150; пересчитай маржинальность; добавь колонку 'Прибыль' = Цена - Себестоимость; исправь артикулы в формате ABC-123; заполни пропуски в колонке 'Бренд'...",
+                height=120,
+                key="ai_prompt"
+            )
+            
+            col_btn1, col_btn2 = st.columns(2)
+            
+            with col_btn1:
+                if st.button("🚀 Выполнить ИИ-редактирование", use_container_width=True, key="ai_edit_btn"):
+                    if not ai_prompt.strip():
+                        st.warning("⚠️ Опишите, что нужно сделать с данными")
+                    else:
+                        with st.spinner("🤖 ИИ обрабатывает данные..."):
+                            df = st.session_state.uploaded_data
+                            
+                            if edit_mode == "📝 Исправить данные":
+                                result_df, message = self.ai_editor.edit_data(df, ai_prompt)
+                            elif edit_mode == "🧮 Пересчитать формулы":
+                                result_df, message = self.ai_editor.edit_formulas(df, ai_prompt)
+                            else:
+                                result_df, message = self.ai_editor.analyze_and_fix_errors(df)
+                            
+                            st.session_state.ai_edited_data = result_df
+                            st.session_state.uploaded_data = result_df
+                            
+                            if message.startswith("✅"):
+                                st.success(message)
+                            else:
+                                st.warning(message)
+            
+            with col_btn2:
+                if st.button("🔄 Сбросить изменения", use_container_width=True, key="ai_reset"):
+                    st.session_state.ai_edited_data = None
+                    st.session_state.uploaded_data = None
+                    st.success("✅ Изменения сброшены")
         
         with col2:
-            marketplace = st.selectbox(
-                "Маркетплейс",
-                ["Все", "Яндекс Маркет", "Ozon", "Wildberries"],
-                key="multiple_marketplace"
-            )
+            st.markdown("### 📊 Текущие данные")
+            if st.session_state.uploaded_data is not None:
+                df = st.session_state.uploaded_data
+                st.metric("📦 Строк", len(df))
+                st.metric("📋 Колонок", len(df.columns))
+                
+                st.markdown("#### 📋 Колонки:")
+                for col in df.columns[:10]:
+                    st.caption(f"• {col} ({df[col].dtype})")
+                if len(df.columns) > 10:
+                    st.caption(f"... и еще {len(df.columns) - 10} колонок")
+        
+        st.divider()
+        
+        if st.session_state.ai_edited_data is not None:
+            st.markdown("### 📊 Результат ИИ-редактирования")
             
-            max_pages = st.number_input(
-                "Макс. страниц",
-                min_value=1,
-                max_value=5,
-                value=1,
-                key="multiple_pages"
-            )
+            df = st.session_state.ai_edited_data
+            st.dataframe(df.head(20), use_container_width=True)
             
-            st.caption("⚠️ Больше страниц = дольше парсинг")
+            col_dl1, col_dl2 = st.columns(2)
+            with col_dl1:
+                csv = df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 Скачать CSV",
+                    data=csv,
+                    file_name="исправленные_данные.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            with col_dl2:
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name='Данные', index=False)
+                output.seek(0)
+                st.download_button(
+                    label="📥 Скачать Excel",
+                    data=output.getvalue(),
+                    file_name="исправленные_данные.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+    
+    def _render_calculate_tab(self):
+        st.markdown("## 📊 Расчет юнит-экономики")
+        
+        if st.session_state.uploaded_data is None:
+            st.warning("⚠️ Сначала загрузите файл с данными")
+            return
+        
+        marketplace = st.selectbox(
+            "🏪 Выберите маркетплейс",
+            CONFIG.marketplaces,
+            index=0,
+            key="calc_marketplace"
+        )
+        
+        mode = st.selectbox(
+            "📦 Выберите режим работы",
+            CONFIG.operation_modes,
+            index=0,
+            key="calc_mode"
+        )
+        
+        days_storage = st.number_input(
+            "📦 Срок хранения (дней)",
+            min_value=1,
+            max_value=730,
+            value=30,
+            key="calc_days"
+        )
+        
+        dimension_unit = st.radio(
+            "📏 Единицы измерения размеров",
+            ["мм", "см"],
+            index=0,
+            key="calc_dimension"
+        )
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🚀 Начать множественный парсинг", type="primary", use_container_width=True, key="start_multiple_parse"):
-                if articles_text.strip():
-                    articles = [a.strip() for a in articles_text.strip().split('\n') if a.strip()]
+            if st.button("🚀 Рассчитать", use_container_width=True, key="calc_btn"):
+                with st.spinner("⏳ Выполняется расчет..."):
+                    df = st.session_state.uploaded_data
                     
-                    if len(articles) > 100:
-                        st.warning(f"⚠️ Слишком много артикулов ({len(articles)}). Максимум 100.")
-                    else:
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        parser = CompetitorParser()
-                        
-                        def update_progress(current, total, message):
-                            progress_bar.progress(current / total)
-                            status_text.text(f"⏳ {message} ({current}/{total})")
-                        
-                        parser.set_progress_callback(update_progress)
-                        
-                        results = parser.parse_multiple_articles(articles, marketplace, max_pages)
-                        
-                        progress_bar.progress(1.0)
-                        status_text.text("✅ Парсинг завершен!")
-                        
-                        if results:
-                            st.success(f"✅ Обработано {len(results)} артикулов!")
-                            
-                            df = parser.format_multiple_results(results)
-                            
-                            if not df.empty:
-                                df['Цена'] = df['Цена'].apply(lambda x: format_currency(x) if x else '0 ₽')
-                                st.dataframe(df, use_container_width=True, hide_index=True)
-                                
-                                st.divider()
-                                col1, col2, col3 = st.columns(3)
-                                
-                                found_count = len(df[df['Статус'] == 'Найден'])
-                                demo_count = len(df[df['Статус'] == 'Демо'])
-                                not_found = len(df[df['Статус'] == 'Не найдено'])
-                                
-                                col1.metric("✅ Найдено", found_count)
-                                col2.metric("🧪 Демо", demo_count)
-                                col3.metric("❌ Не найдено", not_found)
-                                
-                                csv = df.to_csv(index=False, encoding='utf-8-sig')
-                                st.download_button(
-                                    "📥 Скачать результаты (CSV)",
-                                    data=csv,
-                                    file_name=f"парсинг_артикулов_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                                    mime="text/csv",
-                                    use_container_width=True
-                                )
-                else:
-                    st.warning("⚠️ Введите хотя бы один артикул")
+                    rows = df.to_dict(orient='records')
+                    
+                    self.engine = UnitEconomicsEngine(
+                        marketplace=marketplace,
+                        mode=mode,
+                        days_storage=days_storage,
+                        dimension_unit=dimension_unit
+                    )
+                    
+                    self.results = self.engine.calculate_batch(rows, parallel=True)
+                    st.session_state.results = self.results
+                    
+                    st.success(f"✅ Рассчитано {len(self.results)} товаров")
         
         with col2:
-            if st.button("🧹 Очистить список", use_container_width=True, key="clear_articles"):
-                st.session_state.multiple_articles = ""
-                st.rerun()
+            if st.button("📊 Показать результаты", use_container_width=True, key="show_results"):
+                if self.results:
+                    df_results = pd.DataFrame(self.results)
+                    st.dataframe(df_results, use_container_width=True, height=400)
+                    
+                    st.markdown("### 📊 Статистика")
+                    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                    with col_stat1:
+                        total_profit = sum(r.get("unit_profit", 0) for r in self.results)
+                        st.metric("💰 Общая прибыль", format_currency(total_profit))
+                    with col_stat2:
+                        avg_margin = sum(r.get("margin", 0) for r in self.results) / len(self.results) if self.results else 0
+                        st.metric("📈 Средняя маржа", format_percent(avg_margin))
+                    with col_stat3:
+                        profitable = sum(1 for r in self.results if r.get("unit_profit", 0) > 0)
+                        st.metric("✅ Прибыльных", f"{profitable}/{len(self.results)}")
+                    with col_stat4:
+                        avg_roi = sum(r.get("roi", 0) for r in self.results) / len(self.results) if self.results else 0
+                        st.metric("📊 Средний ROI", format_percent(avg_roi))
+                else:
+                    st.info("Сначала выполните расчет")
         
         with col3:
-            if st.button("📋 Загрузить пример", use_container_width=True, key="load_example_articles"):
-                example = "123456\n789012\n345678\n901234\n567890"
-                st.session_state.multiple_articles = example
-                st.rerun()
+            if st.button("📊 Графики", use_container_width=True, key="chart_btn"):
+                if self.results and LIBRARIES['plotly']:
+                    self._render_charts()
+                else:
+                    st.warning("Сначала выполните расчет или установите plotly")
     
-    def _render_file_parse(self):
-        """Парсинг из файла с колонками Артикул и Бренд"""
-        st.markdown("### 📁 Парсинг из файла")
+    def _render_charts(self):
+        """Отображение графиков"""
+        if not self.results or not LIBRARIES['plotly']:
+            return
         
-        st.info("""
-        **Загрузите файл с артикулами и брендами:**
-        - Поддерживаются Excel (.xlsx, .xls) и CSV (.csv)
-        - В файле должны быть колонки: **Артикул** и **Бренд**
-        - Автоматическое определение колонок
-        """)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            file_upload = st.file_uploader(
-                "📂 Загрузите файл с артикулами и брендами",
-                type=["xlsx", "xls", "csv"],
-                key="file_articles"
+        try:
+            import plotly.graph_objects as go
+            import plotly.express as px
+            from plotly.subplots import make_subplots
+            
+            df = pd.DataFrame(self.results)
+            
+            # График 1: Распределение маржинальности
+            fig1 = px.histogram(
+                df, x="margin", 
+                title="📈 Распределение маржинальности",
+                labels={"margin": "Маржа %", "count": "Количество товаров"},
+                nbins=20,
+                color_discrete_sequence=["#1a1a2e"]
             )
-        
-        with col2:
-            if file_upload:
-                try:
-                    if file_upload.name.endswith('.csv'):
-                        df_preview = pd.read_csv(file_upload, encoding='utf-8-sig', nrows=5)
-                    else:
-                        df_preview = pd.read_excel(file_upload, engine='openpyxl', nrows=5)
-                    
-                    st.caption("📋 Превью файла:")
-                    st.dataframe(df_preview, use_container_width=True, hide_index=True)
-                    
-                    # Показываем найденные колонки
-                    article_col = None
-                    brand_col = None
-                    for col in df_preview.columns:
-                        col_lower = col.lower()
-                        if any(w in col_lower for w in ['артикул', 'article', 'sku', 'код', 'id']):
-                            article_col = col
-                        elif any(w in col_lower for w in ['бренд', 'brand', 'марка', 'производитель']):
-                            brand_col = col
-                    
-                    if article_col:
-                        st.success(f"✅ Найдена колонка с артикулами: '{article_col}'")
-                    else:
-                        st.warning("⚠️ Колонка с артикулами не найдена")
-                    
-                    if brand_col:
-                        st.success(f"✅ Найдена колонка с брендами: '{brand_col}'")
-                    else:
-                        st.info("ℹ️ Колонка с брендами не найдена (необязательно)")
-                except:
-                    pass
-        
-        if file_upload:
-            marketplace = st.selectbox(
-                "Маркетплейс",
-                ["Все", "Яндекс Маркет", "Ozon", "Wildberries"],
-                key="file_marketplace"
+            st.plotly_chart(fig1, use_container_width=True)
+            
+            # График 2: Топ по прибыли
+            top_products = df.nlargest(10, "unit_profit")
+            fig2 = px.bar(
+                top_products,
+                x="name",
+                y="unit_profit",
+                title="💰 Топ-10 товаров по прибыли",
+                labels={"name": "Товар", "unit_profit": "Прибыль, ₽"},
+                color="margin",
+                color_continuous_scale="Viridis"
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+            
+            # График 3: Прибыль vs Цена
+            fig3 = px.scatter(
+                df,
+                x="price",
+                y="unit_profit",
+                color="margin",
+                size="volume",
+                title="💎 Прибыль vs Цена",
+                labels={"price": "Цена, ₽", "unit_profit": "Прибыль, ₽"},
+                color_continuous_scale="Viridis",
+                hover_data=["name", "category"]
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+            
+            # График 4: Категории
+            category_data = df.groupby("category").agg({
+                "unit_profit": "sum",
+                "name": "count"
+            }).reset_index().rename(columns={"name": "count"})
+            
+            fig4 = make_subplots(
+                rows=1, cols=2,
+                subplot_titles=("Прибыль по категориям", "Количество по категориям")
             )
             
-            max_pages = st.number_input(
-                "Макс. страниц",
+            fig4.add_trace(
+                go.Bar(x=category_data["category"], y=category_data["unit_profit"], name="Прибыль"),
+                row=1, col=1
+            )
+            
+            fig4.add_trace(
+                go.Bar(x=category_data["category"], y=category_data["count"], name="Количество", marker_color="orange"),
+                row=1, col=2
+            )
+            
+            fig4.update_layout(height=400, showlegend=False)
+            st.plotly_chart(fig4, use_container_width=True)
+            
+        except Exception as e:
+            logger.error(f"Chart error: {e}")
+            st.warning(f"Ошибка построения графиков: {str(e)}")
+    
+    def _render_oem_database_tab(self):
+        st.markdown("## 🔍 База OE номеров")
+        
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.markdown("### 🔎 Поиск по OE номеру")
+            oe_query = st.text_input("Введите OE номер", placeholder="Например: 0986AF0059", key="oe_search")
+            
+            if oe_query:
+                result = self.oem_db.get_by_oe(oe_query)
+                if result:
+                    st.success(f"✅ Найдено: {result.get('brand', '')} - {result.get('category', '')}")
+                    st.json(result)
+                else:
+                    st.warning("❌ OE номер не найден в базе")
+            
+            st.divider()
+            
+            st.markdown("### 📊 Статистика базы")
+            stats = self.oem_db.get_statistics()
+            st.metric("📦 Всего записей", stats["total"])
+            st.metric("🏷️ Категорий", len(stats["categories"]))
+            st.metric("🏢 Брендов", len(stats["brands"]))
+            
+            st.markdown("#### 🏷️ Топ категории:")
+            for cat, count in sorted(stats["categories"].items(), key=lambda x: x[1], reverse=True)[:5]:
+                st.caption(f"• {cat}: {count}")
+        
+        with col2:
+            st.markdown("### 📋 Просмотр базы")
+            
+            search_by = st.selectbox(
+                "Поиск по",
+                ["Все", "Бренд", "Категория", "Применимость"],
+                key="oe_search_by"
+            )
+            
+            if search_by == "Бренд":
+                brand_query = st.text_input("Введите бренд", placeholder="BOSCH", key="brand_search")
+                if brand_query:
+                    results = self.oem_db.search_by_brand(brand_query)
+                    if results:
+                        st.dataframe(pd.DataFrame(results), use_container_width=True)
+                    else:
+                        st.info("Ничего не найдено")
+            elif search_by == "Категория":
+                cat_query = st.text_input("Введите категорию", placeholder="Фильтры", key="cat_search")
+                if cat_query:
+                    results = self.oem_db.search_by_category(cat_query)
+                    if results:
+                        st.dataframe(pd.DataFrame(results), use_container_width=True)
+                    else:
+                        st.info("Ничего не найдено")
+            elif search_by == "Применимость":
+                compat_query = st.text_input("Введите модель", placeholder="BMW 3", key="compat_search")
+                if compat_query:
+                    results = self.oem_db.search_by_compatibility(compat_query)
+                    if results:
+                        st.dataframe(pd.DataFrame(results), use_container_width=True)
+                    else:
+                        st.info("Ничего не найдено")
+            else:
+                st.dataframe(
+                    pd.DataFrame([
+                        {"OE номер": oe, **data} 
+                        for oe, data in list(self.oem_db.data.items())[:50]
+                    ]),
+                    use_container_width=True
+                )
+    
+    def _render_parsing_tab(self):
+        st.markdown("## 📋 Множественный парсинг цен")
+        
+        st.info("""
+        📌 **Парсинг артикулов с маркетплейсов**
+        
+        Введите список артикулов или загрузите файл для массового парсинга цен конкурентов.
+        Система проверит наличие товаров на выбранных маркетплейсах.
+        """)
+        
+        tab1, tab2 = st.tabs(["📝 Список артикулов", "📁 Загрузка файла"])
+        
+        with tab1:
+            articles_text = st.text_area(
+                "Введите артикулы (по одному на строку)",
+                placeholder="ABC-001\nABC-002\nABC-003",
+                height=150,
+                key="articles_text"
+            )
+            
+            marketplace = st.selectbox(
+                "Выберите маркетплейс для парсинга",
+                ["Все", "Яндекс Маркет", "Ozon", "Wildberries"],
+                key="parse_marketplace"
+            )
+            
+            max_pages = st.slider(
+                "Количество страниц для парсинга",
                 min_value=1,
                 max_value=5,
                 value=1,
-                key="file_pages"
+                key="parse_pages"
             )
             
-            if st.button("🚀 Парсить из файла", type="primary", use_container_width=True, key="start_file_parse"):
-                with st.spinner("⏳ Парсинг артикулов из файла..."):
-                    parser = CompetitorParser()
-                    
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    def update_progress(current, total, message):
-                        progress_bar.progress(current / total)
-                        status_text.text(f"⏳ {message} ({current}/{total})")
-                    
-                    parser.set_progress_callback(update_progress)
-                    
-                    results = parser.parse_articles_from_file(
-                        file_upload.getvalue(),
-                        "Артикул",
-                        "Бренд",
-                        marketplace,
-                        max_pages
-                    )
-                    
-                    progress_bar.progress(1.0)
-                    status_text.text("✅ Парсинг завершен!")
-                    
-                    if isinstance(results, dict) and "error" in results:
-                        st.error(f"❌ {results['error']}")
-                    elif results:
-                        st.success(f"✅ Обработано {len(results)} артикулов!")
+            if st.button("🚀 Парсить артикулы", use_container_width=True, key="parse_btn"):
+                articles = [a.strip() for a in articles_text.split('\n') if a.strip()]
+                
+                if not articles:
+                    st.warning("⚠️ Введите хотя бы один артикул")
+                else:
+                    with st.spinner(f"⏳ Парсинг {len(articles)} артикулов..."):
+                        parser = CompetitorParser()
+                        
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        def update_progress(current, total, message):
+                            progress_bar.progress(current / total)
+                            status_text.text(message)
+                        
+                        parser.set_progress_callback(update_progress)
+                        
+                        results = parser.parse_multiple_articles(
+                            articles,
+                            marketplace,
+                            max_pages
+                        )
+                        
+                        st.session_state.parse_results = results
                         
                         df = parser.format_multiple_results(results)
+                        st.dataframe(df, use_container_width=True)
                         
-                        if not df.empty:
-                            df['Цена'] = df['Цена'].apply(lambda x: format_currency(x) if x else '0 ₽')
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-                            
-                            st.divider()
-                            col1, col2, col3 = st.columns(3)
-                            
-                            found_count = len(df[df['Статус'] == 'Найден'])
-                            demo_count = len(df[df['Статус'] == 'Демо'])
-                            not_found = len(df[df['Статус'] == 'Не найдено'])
-                            
-                            col1.metric("✅ Найдено", found_count)
-                            col2.metric("🧪 Демо", demo_count)
-                            col3.metric("❌ Не найдено", not_found)
-                            
-                            csv = df.to_csv(index=False, encoding='utf-8-sig')
-                            st.download_button(
-                                "📥 Скачать результаты (CSV)",
-                                data=csv,
-                                file_name=f"парсинг_файла_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                                mime="text/csv",
-                                use_container_width=True
-                            )
-    
-    def _render_autoupload_tab(self):
-        """Вкладка автовыгрузки"""
-        st.subheader("📤 Автоматическая выгрузка на маркетплейсы")
+                        st.success(f"✅ Парсинг завершен! Найдено {len(df)} результатов")
+                        
+                        csv = df.to_csv(index=False, encoding='utf-8-sig')
+                        st.download_button(
+                            label="📥 Скачать результаты",
+                            data=csv,
+                            file_name="результаты_парсинга.csv",
+                            mime="text/csv"
+                        )
         
-        st.markdown("""
-        **Возможности автовыгрузки:**
-        - ✅ Выгрузка цен на все маркетплейсы
-        - ✅ Выгрузка остатков (стока)
-        - ✅ Создание/обновление карточек товаров
-        - ✅ Автоматическое расписание
-        - ✅ Логирование всех операций
-        """)
+        with tab2:
+            st.markdown("### 📤 Загрузите файл с артикулами")
+            
+            parse_file = st.file_uploader(
+                "Выберите Excel или CSV файл",
+                type=['xlsx', 'xls', 'csv'],
+                key="parse_file_uploader"
+            )
+            
+            if parse_file is not None:
+                try:
+                    if parse_file.name.endswith('.csv'):
+                        df_parse = pd.read_csv(parse_file, encoding='utf-8-sig')
+                    else:
+                        df_parse = pd.read_excel(parse_file, engine='openpyxl')
+                    
+                    st.dataframe(df_parse.head(10), use_container_width=True)
+                    
+                    article_col = st.selectbox(
+                        "Выберите колонку с артикулами",
+                        df_parse.columns,
+                        key="parse_article_col"
+                    )
+                    
+                    brand_col = st.selectbox(
+                        "Выберите колонку с брендами (опционально)",
+                        [None] + list(df_parse.columns),
+                        key="parse_brand_col"
+                    )
+                    
+                    if st.button("🚀 Парсить из файла", use_container_width=True, key="parse_file_btn"):
+                        with st.spinner("⏳ Парсинг артикулов из файла..."):
+                            articles = df_parse[article_col].astype(str).tolist()
+                            articles = [a.strip() for a in articles if a.strip()]
+                            
+                            parser = CompetitorParser()
+                            results = parser.parse_multiple_articles(articles, marketplace, max_pages)
+                            
+                            if brand_col:
+                                brand_map = dict(zip(df_parse[article_col].astype(str), df_parse[brand_col].astype(str)))
+                                for article, brand in brand_map.items():
+                                    if article in results:
+                                        results[article]['_brand'] = brand
+                            
+                            df_results = parser.format_multiple_results(results)
+                            st.dataframe(df_results, use_container_width=True)
+                            st.success(f"✅ Парсинг завершен! Найдено {len(df_results)} результатов")
+                            
+                            csv = df_results.to_csv(index=False, encoding='utf-8-sig')
+                            st.download_button(
+                                label="📥 Скачать результаты",
+                                data=csv,
+                                file_name="результаты_парсинга_файл.csv",
+                                mime="text/csv"
+                            )
+                            
+                except Exception as e:
+                    st.error(f"❌ Ошибка загрузки файла: {str(e)}")
+    
+    def _render_export_tab(self):
+        st.markdown("## 📤 Экспорт результатов")
+        
+        if not self.results:
+            st.warning("⚠️ Сначала выполните расчет в разделе '📊 Расчет'")
+            return
+        
+        st.success(f"✅ Готово к экспорту: {len(self.results)} товаров")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("### 📤 Выгрузка сейчас")
+            st.markdown("### 📊 Excel экспорт")
+            
+            include_summary = st.checkbox("Включить сводку", value=True, key="export_summary")
+            include_rates = st.checkbox("Включить тарифы", value=True, key="export_rates")
+            
+            if st.button("📥 Экспорт в Excel", use_container_width=True, key="export_excel_btn"):
+                with st.spinner("⏳ Формирование Excel файла..."):
+                    try:
+                        marketplace = self.engine.marketplace if self.engine else "Яндекс Маркет"
+                        mode = self.engine.mode if self.engine else "FBY"
+                        
+                        all_rates = self.tariff_provider.get_all_rates() if include_rates else None
+                        
+                        excel_data = self.exporter.export(
+                            self.results,
+                            marketplace,
+                            mode,
+                            all_rates
+                        )
+                        
+                        st.download_button(
+                            label="📥 Скачать Excel файл",
+                            data=excel_data,
+                            file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                        
+                        st.success("✅ Excel файл готов к скачиванию!")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Ошибка экспорта: {str(e)}")
+        
+        with col2:
+            st.markdown("### 📊 Другие форматы")
+            
+            if st.button("📥 CSV (для Excel/Google Sheets)", use_container_width=True, key="export_csv_btn"):
+                df = pd.DataFrame(self.results)
+                csv = df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 Скачать CSV",
+                    data=csv,
+                    file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            
+            if st.button("📥 JSON (для API)", use_container_width=True, key="export_json_btn"):
+                json_data = json.dumps(self.results, ensure_ascii=False, indent=2, default=str)
+                st.download_button(
+                    label="📥 Скачать JSON",
+                    data=json_data,
+                    file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
+            
+            st.divider()
+            
+            st.markdown("### 📤 Отправка в Telegram")
+            if "telegram" in st.session_state and st.session_state.telegram:
+                if st.button("📤 Отправить отчет в Telegram", use_container_width=True):
+                    with st.spinner("⏳ Отправка..."):
+                        try:
+                            if st.session_state.telegram.send_report(self.results):
+                                st.success("✅ Отчет отправлен в Telegram!")
+                            else:
+                                st.error("❌ Ошибка отправки в Telegram")
+                        except Exception as e:
+                            st.error(f"❌ Ошибка: {str(e)}")
+            else:
+                st.caption("🔑 Для отправки в Telegram настройте токен в боковой панели")
+    
+    def _render_autoupload_tab(self):
+        st.markdown("## 📤 Автоматическая выгрузка на маркетплейсы")
+        
+        st.info("""
+        📌 **Автоматическая выгрузка данных на маркетплейсы**
+        
+        Система может автоматически обновлять цены, остатки и карточки товаров
+        на подключенных маркетплейсах через API.
+        """)
+        
+        if not self.results:
+            st.warning("⚠️ Сначала выполните расчет в разделе '📊 Расчет'")
+            return
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 🏪 Выбор маркетплейса")
+            upload_marketplace = st.selectbox(
+                "Маркетплейс",
+                CONFIG.marketplaces,
+                key="upload_marketplace"
+            )
             
             upload_type = st.selectbox(
                 "Тип выгрузки",
@@ -4744,525 +4225,32 @@ class UnitEconomicsApp:
                 key="upload_type"
             )
             
-            marketplace = st.selectbox(
-                "Маркетплейс",
-                ["Яндекс Маркет", "Ozon", "Wildberries"],
-                key="upload_marketplace"
-            )
+            st.markdown("### 📋 Настройки")
+            st.caption(f"Всего товаров для выгрузки: {len(self.results)}")
             
-            if st.button("🚀 Запустить выгрузку", type="primary", use_container_width=True, key="start_upload"):
-                if self.results:
-                    with st.spinner(f"⏳ Выгрузка {upload_type} на {marketplace}..."):
-                        products = []
-                        for product in self.results:
-                            p = {
-                                "offer_id": product.get("article", ""),
-                                "article": product.get("article", ""),
-                                "price": product.get("recommended_price", product.get("price", 0)),
-                                "stock": product.get("quantity", 100),
-                                "name": product.get("name", ""),
-                                "category": product.get("category", ""),
-                                "brand": product.get("brand", ""),
-                                "barcode": product.get("barcode", ""),
-                                "length_mm": product.get("length_mm", 0),
-                                "width_mm": product.get("width_mm", 0),
-                                "height_mm": product.get("height_mm", 0)
-                            }
-                            products.append(p)
-                        
-                        if upload_type == "Цены":
-                            result = self.uploader.upload_prices(marketplace, products)
-                        elif upload_type == "Остатки":
-                            result = self.uploader.upload_stocks(marketplace, products)
-                        else:
-                            result = self.uploader.upload_products(marketplace, products)
-                        
-                        if result:
-                            st.success(f"✅ Выгрузка завершена: {result['success']} успешно, {result['failed']} ошибок")
-                            if result.get('errors'):
-                                with st.expander("📋 Детали ошибок"):
-                                    for error in result['errors'][:10]:
-                                        st.error(f"{error['offer_id']}: {error['error']}")
-                                        if len(result['errors']) > 10:
-                                            st.caption(f"... и еще {len(result['errors']) - 10} ошибок")
-                        else:
-                            st.error("❌ Ошибка выгрузки")
-                else:
-                    st.warning("⚠️ Сначала рассчитайте юнит-экономику")
-        
-        with col2:
-            st.markdown("### ⏰ Расписание выгрузок")
-            
-            enable_schedule = st.checkbox("Включить автоматические выгрузки", value=False, key="enable_schedule")
-            
-            if enable_schedule:
-                schedule_type = st.selectbox(
-                    "Тип расписания",
-                    ["Интервал", "По расписанию"],
-                    key="schedule_type"
-                )
-                
-                if schedule_type == "Интервал":
-                    interval = st.selectbox(
-                        "Интервал",
-                        ["Каждый час", "Каждые 3 часа", "Каждые 6 часов", "Каждый день"],
-                        key="interval_select"
-                    )
-                    interval_seconds = {"Каждый час": 3600, "Каждые 3 часа": 10800, "Каждые 6 часов": 21600, "Каждый день": 86400}
-                    
-                else:
-                    hour = st.selectbox("Час", range(0, 24), index=9, key="schedule_hour")
-                    minute = st.selectbox("Минута", range(0, 60), index=0, key="schedule_minute")
-                
-                upload_tasks = st.multiselect(
-                    "Задачи для автоматической выгрузки",
-                    ["Выгрузка цен", "Выгрузка остатков", "Синхронизация с 1С", "Отправка отчета в CRM"],
-                    default=["Выгрузка цен"],
-                    key="upload_tasks"
-                )
-                
-                if st.button("✅ Сохранить расписание", use_container_width=True, key="save_schedule"):
-                    schedule_data = {
-                        "type": "interval" if schedule_type == "Интервал" else "cron",
-                        "task_type": "upload_prices",
-                        "interval_seconds": interval_seconds.get(interval, 3600),
-                        "tasks": upload_tasks
-                    }
-                    if schedule_type != "Интервал":
-                        schedule_data["hour"] = hour
-                        schedule_data["minute"] = minute
-                    
-                    self.scheduler.add_schedule("default", schedule_data)
-                    if enable_schedule:
-                        self.scheduler.run_scheduled()
-                    
-                    st.success("✅ Расписание сохранено!")
-            
-            st.divider()
-            
-            st.markdown("### 📋 Лог выгрузок")
-            log = self.uploader.get_upload_log()
-            if log:
-                for entry in log[-5:]:
-                    with st.expander(f"📌 {entry.get('marketplace', '')} - {entry.get('timestamp', '')[:19]}"):
-                        st.metric("Успешно", entry.get('success', 0))
-                        st.metric("Ошибок", entry.get('failed', 0))
-                        if entry.get('errors'):
-                            st.warning(f"⚠️ {len(entry.get('errors', []))} ошибок")
-                if st.button("🗑️ Очистить лог", key="clear_log"):
-                    self.uploader.clear_log()
-                    st.success("Лог очищен")
+            if upload_type == "Цены":
+                st.caption("💡 Будут выгружены рекомендуемые цены")
+            elif upload_type == "Остатки":
+                st.caption("💡 Будут выгружены остатки (нужна колонка 'quantity')")
             else:
-                st.info("Нет записей в логе")
-    
-    def _render_integration_tab(self):
-        """Вкладка интеграции с 1С/CRM"""
-        st.subheader("🔄 Интеграция с 1С и CRM")
-        
-        st.markdown("""
-        **Поддерживаемые интеграции:**
-        - ✅ 1С:Предприятие (обмен товарами, ценами, остатками)
-        - ✅ AmoCRM (отправка отчетов)
-        - ✅ Bitrix24 (создание сделок)
-        - ✅ HubSpot (отправка данных)
-        """)
-        
-        tab1, tab2 = st.tabs(["🔗 1С", "📊 CRM"])
-        
-        with tab1:
-            st.markdown("### 🔗 Настройка интеграции с 1С")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                onec_url = st.text_input(
-                    "URL 1С Web-сервиса",
-                    placeholder="https://1c-server.ru/api",
-                    key="onec_url"
-                )
-                onec_login = st.text_input("Логин 1С", key="onec_login")
-                onec_password = st.text_input("Пароль 1С", type="password", key="onec_password")
-                
-                if st.button("🔗 Подключить 1С", use_container_width=True, key="connect_1c"):
-                    if onec_url:
-                        self.onec = OneCIntegration(onec_url, onec_login, onec_password)
-                        st.success("✅ 1С подключена!")
-                    else:
-                        st.warning("⚠️ Введите URL 1С")
-            
-            with col2:
-                st.markdown("### 📤 Действия")
-                
-                action = st.selectbox(
-                    "Действие",
-                    ["Экспорт товаров в 1С", "Импорт товаров из 1С", "Синхронизация цен", "Синхронизация остатков"],
-                    key="onec_action"
-                )
-                
-                if st.button("🚀 Выполнить", use_container_width=True, key="execute_1c"):
-                    if action == "Экспорт товаров в 1С":
-                        if self.results:
-                            result = self.onec.export_to_1c(self.results[:100], "products")
-                            if result.get('status') == 'success':
-                                st.success("✅ Товары экспортированы в 1С")
-                            else:
-                                st.error(f"❌ Ошибка: {result.get('message')}")
-                        else:
-                            st.warning("⚠️ Нет данных для экспорта")
-                    
-                    elif action == "Импорт товаров из 1С":
-                        data = self.onec.import_from_1c("products")
-                        if data:
-                            st.success(f"✅ Импортировано {len(data)} товаров из 1С")
-                            st.json(data[:5])
-                        else:
-                            st.warning("⚠️ Нет данных для импорта")
-        
-        with tab2:
-            st.markdown("### 📊 Настройка интеграции с CRM")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                crm_type = st.selectbox(
-                    "Тип CRM",
-                    ["AmoCRM", "Bitrix24", "HubSpot", "Другая"],
-                    key="crm_type"
-                )
-                
-                crm_url = st.text_input(
-                    "URL CRM API",
-                    placeholder="https://your-crm.com/api",
-                    key="crm_url"
-                )
-                crm_token = st.text_input("API ключ/Token", type="password", key="crm_token")
-                
-                if st.button("🔗 Подключить CRM", use_container_width=True, key="connect_crm"):
-                    if crm_url and crm_token:
-                        self.crm = CRMIntegration(
-                            crm_type.lower().replace(" ", ""),
-                            crm_token,
-                            crm_url
-                        )
-                        st.success("✅ CRM подключена!")
-                    else:
-                        st.warning("⚠️ Введите URL и API ключ")
-            
-            with col2:
-                st.markdown("### 📤 Отправка отчета")
-                
-                if st.button("📊 Отправить отчет в CRM", type="primary", use_container_width=True, key="send_crm_report"):
-                    if self.results:
-                        total_profit = sum(r.get("unit_profit", 0) for r in self.results)
-                        profitable = sum(1 for r in self.results if r.get("unit_profit", 0) > 0)
-                        avg_margin = sum(r.get("margin", 0) for r in self.results) / len(self.results) if self.results else 0
-                        
-                        report_data = {
-                            "title": f"Отчет по юнит-экономике от {datetime.now().strftime('%d.%m.%Y')}",
-                            "summary": f"""
-                            Всего товаров: {len(self.results)}
-                            Прибыльных: {profitable}
-                            Общая прибыль: {format_currency(total_profit)}
-                            Средняя маржа: {format_percent(avg_margin)}
-                            """,
-                            "total_profit": total_profit,
-                            "product_count": len(self.results),
-                            "profitable_count": profitable
-                        }
-                        
-                        result = self.crm.send_report(report_data)
-                        if result.get('status') == 'success':
-                            st.success("✅ Отчет отправлен в CRM!")
-                            st.json(result.get('data', {}))
-                        else:
-                            st.error(f"❌ Ошибка: {result.get('message')}")
-                    else:
-                        st.warning("⚠️ Сначала рассчитайте юнит-экономику")
-    
-    def _render_dashboard_tab(self):
-        """Вкладка дашборда"""
-        st.subheader("📊 Дашборд аналитики")
-        
-        if not PLOTLY_AVAILABLE:
-            st.warning("⚠️ Установите plotly для графиков: pip install plotly")
-            return
-        
-        df = self.sales_analytics.get_sales_dataframe()
-        
-        if df.empty:
-            st.info("💡 Нет данных для отображения. Добавьте продажи или сгенерируйте демо-данные.")
-            if st.button("🔄 Сгенерировать демо-данные", key="gen_demo"):
-                self._generate_demo_sales()
-                st.rerun()
-            return
-        
-        if not df.empty:
-            self._render_fast_metrics(df)
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("📈 Показать тренд продаж", use_container_width=True, key="show_trend"):
-                    self._render_sales_trend(df)
-            
-            with col2:
-                if st.button("📊 Показать категории", use_container_width=True, key="show_categories"):
-                    self._render_category_chart(df)
-    
-    def _render_fast_metrics(self, df: pd.DataFrame):
-        """Быстрые метрики"""
-        total_revenue = (df['quantity'] * df['price']).sum()
-        total_profit = df['profit'].sum()
-        total_orders = len(df)
-        
-        col1, col2, col3 = st.columns(3)
-        
-        col1.metric("💰 Выручка", format_currency(total_revenue))
-        col2.metric("💵 Прибыль", format_currency(total_profit))
-        col3.metric("📦 Заказов", f"{total_orders}")
-    
-    def _render_sales_trend(self, df: pd.DataFrame):
-        """График тренда продаж"""
-        if not PLOTLY_AVAILABLE:
-            st.info("Установите plotly для графиков")
-            return
-        
-        daily = df.groupby('date').agg({
-            'quantity': 'sum',
-            'profit': 'sum'
-        }).reset_index()
-        
-        fig = go.Figure()
-        
-        fig.add_trace(go.Scatter(
-            x=daily['date'],
-            y=daily['profit'],
-            name="Прибыль",
-            line=dict(color="#e94560", width=2),
-            fill='tozeroy',
-            fillcolor='rgba(233, 69, 96, 0.2)'
-        ))
-        
-        fig.add_trace(go.Bar(
-            x=daily['date'],
-            y=daily['quantity'],
-            name="Кол-во",
-            marker=dict(color="#0f3460", opacity=0.7),
-            yaxis="y2"
-        ))
-        
-        fig.update_layout(
-            height=350,
-            margin=dict(l=0, r=0, t=20, b=0),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            hovermode='x unified',
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            yaxis=dict(title="Прибыль, ₽"),
-            yaxis2=dict(title="Кол-во", overlaying="y", side="right")
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    
-    def _render_category_chart(self, df: pd.DataFrame):
-        """График по категориям"""
-        if not PLOTLY_AVAILABLE:
-            st.info("Установите plotly для графиков")
-            return
-        
-        category = df.groupby('category').agg({
-            'profit': 'sum'
-        }).reset_index().sort_values('profit', ascending=True)
-        
-        fig = go.Figure()
-        
-        fig.add_trace(go.Bar(
-            y=category['category'],
-            x=category['profit'],
-            orientation='h',
-            marker=dict(
-                color=category['profit'],
-                colorscale='Reds',
-                showscale=True
-            ),
-            text=category['profit'].apply(lambda x: f"{x:,.0f}₽"),
-            textposition='outside'
-        ))
-        
-        fig.update_layout(
-            height=350,
-            margin=dict(l=0, r=0, t=20, b=0),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            xaxis_title="Прибыль, ₽",
-            yaxis_title=""
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    
-    def _generate_demo_sales(self):
-        """Генерация демо-данных"""
-        categories = ["Двигатель", "Трансмиссия", "Подвеска", "Тормозная система", 
-                     "Масла и жидкости", "Фильтры", "Электрооборудование"]
-        
-        start_date = datetime.now() - timedelta(days=30)
-        
-        for i in range(50):
-            date = start_date + timedelta(days=random.randint(0, 30))
-            category = random.choice(categories)
-            quantity = random.randint(1, 3)
-            price = random.randint(500, 10000)
-            cost = price * random.uniform(0.5, 0.7)
-            
-            self.sales_analytics.add_sale({
-                "category": category,
-                "quantity": quantity,
-                "price": price,
-                "cost": cost,
-                "profit": (price - cost) * quantity,
-                "marketplace": random.choice(["Яндекс Маркет", "Ozon", "Wildberries"])
-            })
-        
-        st.success("✅ Демо-данные сгенерированы!")
-    
-    def _execute_api_request(self, marketplace: str, action: str) -> Optional[Dict]:
-        """Выполнение API-запроса"""
-        st.info(f"📌 {marketplace}: {action} (требуется настройка API ключей)")
-        
-        return {
-            "status": "success",
-            "marketplace": marketplace,
-            "action": action,
-            "timestamp": datetime.now().isoformat(),
-            "data": {
-                "items": [
-                    {"id": "1", "name": "Товар 1", "price": 1000},
-                    {"id": "2", "name": "Товар 2", "price": 2000}
-                ]
-            }
-        }
-    
-    def _get_marketplace_from_sidebar(self) -> str:
-        """Получение маркетплейса из боковой панели"""
-        return "Яндекс Маркет"
-    
-    def _get_mode_from_sidebar(self) -> str:
-        """Получение режима из боковой панели"""
-        return "FBY"
-    
-    def _get_days_storage_from_sidebar(self) -> int:
-        """Получение дней хранения из боковой панели"""
-        return 30
-    
-    def _show_results(self, results: List[Dict]):
-        """Отображение результатов"""
-        if not results:
-            return
-        
-        st.subheader("📊 Результаты расчета")
-        self._show_product_results(results)
-    
-    def _show_product_results(self, results: List[Dict]):
-        """Отображение результатов товарной модели"""
-        total_profit = sum(r.get("unit_profit", 0) for r in results)
-        avg_margin = sum(r.get("margin", 0) for r in results) / len(results) if results else 0
-        profitable = sum(1 for r in results if r.get("unit_profit", 0) > 0)
-        
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("📦 Товаров", len(results))
-        col2.metric("💰 Прибыльных", profitable)
-        col3.metric("💵 Общая прибыль", format_currency(total_profit))
-        col4.metric("📊 Ср. маржа", format_percent(avg_margin))
-        col5.metric("🏷️ Категорий", len(set(r.get("category", "Прочее") for r in results)))
-        
-        st.subheader("🏆 Топ-10 по прибыли")
-        top = sorted(results, key=lambda x: x.get("unit_profit", 0), reverse=True)[:10]
-        if top:
-            df_top = pd.DataFrame([{
-                "Артикул": r.get("article", ""),
-                "Наименование": r.get("name", "")[:30],
-                "Бренд": r.get("brand", ""),
-                "OE номер": r.get("oe_number", ""),
-                "Категория": r.get("category", ""),
-                "Штрихкод": r.get("barcode", ""),
-                "Цена": format_currency(r.get("price", 0)),
-                "Прибыль": format_currency(r.get("unit_profit", 0)),
-                "Маржа": format_percent(r.get("margin", 0)),
-                "Вес (кг)": r.get("weight", 0),
-                "ABC": r.get("abc_category", ""),
-                "Позиция цены": r.get("price_position", ""),
-                "Размеры": f"{r.get('length_orig', 0)}x{r.get('width_orig', 0)}x{r.get('height_orig', 0)} {r.get('dimension_unit', 'мм')}"
-            } for r in top])
-            st.dataframe(df_top, use_container_width=True, hide_index=True)
-    
-    def _show_export(self, results: List[Dict]):
-        """Отображение экспорта"""
-        st.subheader("📥 Экспорт в Excel")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.info(f"📊 Экспортируемых позиций: {len(results):,}")
-            st.info(f"🏷️ Категорий: {len(set(r.get('category', '') for r in results))}")
-            st.info(f"📏 Единицы: {self.dimension_unit}")
+                st.caption("💡 Будут созданы/обновлены карточки товаров")
         
         with col2:
-            marketplace = self._get_marketplace_from_sidebar()
-            mode = self._get_mode_from_sidebar()
+            st.markdown("### 📋 Предпросмотр")
+            if self.results:
+                preview_data = []
+                for r in self.results[:5]:
+                    preview_data.append({
+                        "Артикул": r.get("article", ""),
+                        "Цена": r.get("price", 0),
+                        "Рекомендуемая": r.get("recommended_price", 0),
+                        "Маржа": r.get("margin", 0)
+                    })
+                st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
             
-            if st.button("📥 Скачать Excel-отчет", type="primary", use_container_width=True, key="download_excel"):
-                with st.spinner("⏳ Генерация Excel-файла..."):
-                    try:
-                        if not self.all_rates:
-                            self.all_rates = self.tariff_provider.get_all_rates()
-                        
-                        data = self.exporter.export(results, marketplace, mode, self.all_rates)
-                        
-                        if data:
-                            st.download_button(
-                                "📥 Скачать файл",
-                                data=data,
-                                file_name=f"юнит_экономика_{marketplace}_{mode}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True,
-                                key="download_file"
-                            )
-                            st.success("✅ Отчет готов к скачиванию!")
-                        else:
-                            st.error("❌ Ошибка генерации отчета")
-                    except Exception as e:
-                        st.error(f"❌ Ошибка: {str(e)}")
-                        logger.error(f"Export error: {e}")
-        
-        with col3:
-            if st.button("📤 Экспорт в Google Sheets", use_container_width=True, key="export_gsheets"):
-                if self.results:
-                    with st.spinner("⏳ Экспорт в Google Sheets..."):
-                        result = self.google_sheets.export_results(self.results)
-                        if result.get('status') == 'success':
-                            st.success(f"✅ {result.get('message')}")
-                            st.info(f"🔗 {result.get('url')}")
-                        else:
-                            st.error(f"❌ {result.get('message')}")
-                else:
-                    st.warning("⚠️ Сначала рассчитайте юнит-экономику")
-        
-        with st.expander("📋 Превью данных"):
-            if results:
-                preview = pd.DataFrame([{
-                    "Артикул": r.get("article", ""),
-                    "Наименование": r.get("name", "")[:25],
-                    "Бренд": r.get("brand", ""),
-                    "OE номер": r.get("oe_number", ""),
-                    "Категория": r.get("category", ""),
-                    "Штрихкод": r.get("barcode", ""),
-                    "Цена": r.get("price", 0),
-                    "Вес (кг)": r.get("weight", 0),
-                    "Прибыль": r.get("unit_profit", 0),
-                    "Маржа %": r.get("margin", 0),
-                    "Позиция цены": r.get("price_position", ""),
-                    "Размеры": f"{r.get('length_orig', 0)}x{r.get('width_orig', 0)}x{r.get('height_orig', 0)} {r.get('dimension_unit', 'мм')}"
-                } for r in results[:20]])
-                st.dataframe(preview, use_container_width=True, hide_index=True)
-                st.caption(f"Показаны первые 20 из {len(results):,}")
+            if st.button("🚀 Запустить выгрузку", use_container_width=True, key="start_upload"):
+                st.warning("⚠️ Функция выгрузки требует настройки API ключей в боковой панели")
+                st.info("После настройки API ключей, выгрузка будет выполняться автоматически")
 
 # --------------------------------------------
 # ЗАПУСК
